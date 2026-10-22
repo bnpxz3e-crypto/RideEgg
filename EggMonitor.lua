@@ -2,7 +2,7 @@
 -- RIDE A PET | EGG MONITOR
 -- TELEGRAM + 4 EGG PHOTOS + COLLECT + EVENT 5
 
-local TOKEN = "ใส่_TOKEN_ใหม่"
+local TOKEN = "8828641953:AAHP58nmC9bklzUxhRmHiU0hEslHvPp2cRk"
 local CHAT = "1813392489"
 
 local Players = game:GetService("Players")
