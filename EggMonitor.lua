@@ -30,10 +30,6 @@ local switches = {
 }
 
 local eggs = {
-    ["Blackhole Egg"] = {
-        id = "133246489138606",
-        emoji = "🌌"
-    },
     ["Volcanic Egg"] = {
         id = "132679696143806",
         emoji = "🌋"
@@ -48,7 +44,7 @@ local eggs = {
     }
 }
 
-if not H or TOKEN == "PUT_YOUR_NEW_BOT_TOKEN_HERE" then
+if not H or TOKEN == "8828641953:AAHP58nmC9bklzUxhRmHiU0hEslHvPp2cRk" then
     warn("กรุณาใส่ Telegram Bot Token")
     return
 end
