@@ -6,10 +6,9 @@ local CHAT = "1813392489"
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local HS = game:GetService("HttpService")
-local SG = game:GetService("StarterGui")
 
 local P = Players.LocalPlayer
-local ROOTS = {P.PlayerGui, game.CoreGui}
+local ROOTS = {P:WaitForChild("PlayerGui"), game.CoreGui}
 local A = RS:WaitForChild("ServerData"):WaitForChild("ActiveEggs")
 
 local H = (syn and syn.request)
@@ -44,49 +43,35 @@ local eggs = {
     }
 }
 
-if not H or TOKEN == "8828641953:AAHP58nmC9bklzUxhRmHiU0hEslHvPp2cRk" then
+if not H then
+    warn("ไม่พบ HTTP request")
+    return
+end
+
+if TOKEN == "" or TOKEN == "PUT_YOUR_BOT_TOKEN_HERE" then
     warn("กรุณาใส่ Telegram Bot Token")
     return
 end
 
+-- หยุดสคริปต์เวอร์ชันก่อน
 local ENV = getgenv()
 ENV.RideEggRun = (ENV.RideEggRun or 0) + 1
+
 local RUN = ENV.RideEggRun
 
 local function alive()
     return ENV.RideEggRun == RUN
 end
 
-local function notify(t)
-    pcall(function()
-        SG:SetCore("SendNotification", {
-            Title = "EGG AUTO",
-            Text = t,
-            Duration = 6
-        })
-    end)
+-- ไม่มี GUI และไม่มี Notification กลางจอ
+local function status(t)
+    print("[RIDE EGG] " .. tostring(t))
 end
 
+-- ลบหน้าต่างสถานะเก่าของสคริปต์
 local old = P.PlayerGui:FindFirstChild("RideEggStatus")
-if old then old:Destroy() end
-
-local gui = Instance.new("ScreenGui")
-gui.Name = "RideEggStatus"
-gui.ResetOnSpawn = false
-gui.Parent = nil
-
-local label = Instance.new("TextLabel")
-label.Size = UDim2.fromOffset(350, 115)
-label.Position = UDim2.new(.5, -175, .3, 0)
-label.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-label.TextColor3 = Color3.new(1, 1, 1)
-label.TextSize = 17
-label.TextWrapped = true
-label.Text = "กำลังเชื่อมต่อ Telegram..."
-label.Parent = gui
-
-local function status(t)
-
+if old then
+    old:Destroy()
 end
 
 local API = "https://api.telegram.org/bot" .. TOKEN
@@ -139,19 +124,28 @@ local function photoUrl(id)
         })
     end)
 
-    if not ok or not res then return nil end
+    if not ok or not res then
+        return nil
+    end
 
     local good, data = pcall(function()
         return HS:JSONDecode(res.Body or "{}")
     end)
 
-    if not good then return nil end
+    if not good then
+        return nil
+    end
 
     local item = data.data and data.data[1]
-    return item and item.imageUrl or nil
+
+    if item and item.state == "Completed" then
+        return item.imageUrl
+    end
+
+    return nil
 end
 
--- กด GUI แบบเดียวกับโค้ดที่เคยใช้ได้
+-- กดปุ่ม GUI
 local function press(b)
     if not b or not b:IsA("GuiButton") then
         return false
@@ -171,11 +165,12 @@ local function press(b)
     return n > 0
 end
 
+-- หา Halloween Event Switch
 local function findSwitch(name)
     for _, root in ipairs(ROOTS) do
         local frame = root:FindFirstChild(name, true)
 
-        if frame and frame:IsA("Frame") then
+        if frame then
             local sw = frame:FindFirstChild("Switch", true)
             local b = sw and sw:FindFirstChild("Button", true)
 
@@ -184,52 +179,65 @@ local function findSwitch(name)
             end
         end
     end
+
+    return nil
 end
 
--- ใช้การ Toggle เหมือนโค้ดต้นฉบับ
 local function toggle5()
     local n = 0
 
     for _, name in ipairs(switches) do
+        if not alive() then
+            break
+        end
+
         if press(findSwitch(name)) then
             n = n + 1
         end
 
-        task.wait(.3)
+        task.wait(0.3)
     end
 
     return n
 end
 
+-- หา Map Eggs Card
 local function getCards()
     local cards = {}
     local seen = {}
 
     for _, root in ipairs(ROOTS) do
         for _, v in ipairs(root:GetDescendants()) do
-            if v:IsA("TextLabel") and eggs[v.Text] then
-                local parent = v.Parent
+            if v:IsA("TextLabel") then
+                local name = v.Text
 
-                for _ = 1, 4 do
-                    if not parent then break end
+                if eggs[name] then
+                    local parent = v.Parent
 
-                    local b = parent:FindFirstChild("Open")
-
-                    if b and b:IsA("GuiButton") then
-                        if not seen[b] then
-                            seen[b] = true
-
-                            table.insert(cards, {
-                                name = v.Text,
-                                button = b,
-                                label = v
-                            })
+                    for _ = 1, 5 do
+                        if not parent then
+                            break
                         end
 
-                        break
-                    end
+                        local b = parent:FindFirstChild("Open")
 
-                    parent = parent.Parent
+                        if b and b:IsA("GuiButton") then
+                            if not seen[b] then
+                                seen[b] = true
+
+                                table.insert(cards, {
+                                    name = name,
+                                    button = b,
+                                    label = v,
+                                    container = parent
+                                })
+                            end
+
+                            break
+                        end
+
+                        parent = parent.Parent
+                    end
                 end
             end
         end
@@ -238,19 +246,40 @@ local function getCards()
     return cards
 end
 
-local function getWeight(name)
+-- อ่านน้ำหนักจากการ์ดที่ตรงกับไข่
+local function readWeight(name)
     for _, card in ipairs(getCards()) do
         if card.name == name then
-            local parent = card.label.Parent
+            local parent = card.container
 
-            for _ = 1, 4 do
-                if not parent then break end
+            for _ = 1, 5 do
+                if not parent then
+                    break
+                end
 
                 local w = parent:FindFirstChild("EggWeight", true)
 
-                if w and w:IsA("TextLabel")
-                    and w.Text ~= "" then
-                    return w.Text
+                if w and w:IsA("TextLabel") then
+                    local value = w.Text
+
+                    if value and value ~= ""
+                        and value:lower():find("kg", 1, true) then
+                        return value
+                    end
+                end
+
+                -- สำรอง: ค้นหา TextLabel ที่มี KG
+                for _, x in ipairs(parent:GetDescendants()) do
+                    if x:IsA("TextLabel")
+                        and x ~= card.label then
+
+                        local value = x.Text
+
+                        if value
+                            and value:lower():find("kg", 1, true) then
+                            return value
+                        end
+                    end
                 end
 
                 parent = parent.Parent
@@ -258,9 +287,29 @@ local function getWeight(name)
         end
     end
 
+    return nil
+end
+
+-- รอให้ GUI โหลดน้ำหนัก
+local function getWeight(name)
+    for attempt = 1, 12 do
+        if not alive() then
+            return "ไม่ทราบ"
+        end
+
+        local weight = readWeight(name)
+
+        if weight then
+            return weight
+        end
+
+        task.wait(0.5)
+    end
+
     return "ไม่ทราบ"
 end
 
+-- รายการไข่ที่ยังอยู่ใน ActiveEggs
 local function getIds()
     local ids = {}
 
@@ -279,17 +328,28 @@ end
 local seenEggs = {}
 local busy = false
 
+-- แจ้งเตือนพบไข่
 local function announce(e)
-    if not alive() or not e.Parent then return end
+    if not alive() or not e.Parent then
+        return
+    end
 
     local name = e:GetAttribute("Egg")
     local info = eggs[name]
 
-    if not info then return end
+    if not info then
+        return
+    end
+
+    local weight = getWeight(name)
+
+    if not alive() or not e.Parent then
+        return
+    end
 
     local caption =
         info.emoji .. " พบ " .. name
-        .. "\n⚖️ KG: " .. getWeight(name)
+        .. "\n⚖️ KG: " .. weight
         .. "\n🥚 กดปุ่มเพื่อเก็บไข่"
 
     local keyboard = {
@@ -322,7 +382,7 @@ local function announce(e)
     end
 end
 
--- กระบวนการเก็บไข่
+-- เก็บไข่ตามคำสั่ง Telegram
 local function collectCycle(requestId)
     if busy then
         send("⏳ กำลังเก็บไข่รอบก่อนอยู่")
@@ -341,19 +401,27 @@ local function collectCycle(requestId)
     local function run()
         local wanted = chosen:GetAttribute("Egg")
 
-        -- 1. แจ้ง Telegram
+        -- 1. แจ้งว่ากำลังไปเก็บไข่
         status("กำลังไปเก็บไข่ " .. wanted)
-        send("🥚 กำลังไปเก็บไข่\n" .. wanted)
 
-        -- 2. ปิด Event
+        send(
+            "🥚 กำลังไปเก็บไข่\n"
+            .. wanted
+        )
+
+        -- 2. ปิด Halloween Event
         status("กำลังปิด Halloween Event")
+
         local off = toggle5()
 
-        send("⏸ สั่งปิด Halloween Event " .. off .. "/5")
+        send(
+            "⏸ สั่งปิด Halloween Event "
+            .. off .. "/5"
+        )
 
         task.wait(1)
 
-        -- 3. หาไข่และปุ่ม Collect
+        -- 3. Collect สูงสุด 2 ใบ
         local ids = getIds()
         local cards = getCards()
 
@@ -362,25 +430,30 @@ local function collectCycle(requestId)
         local usedButtons = {}
         local count = 0
 
-        -- ให้ไข่ที่กดใน Telegram มาก่อน
         table.sort(cards, function(a, b)
-            return (a.name == wanted and b.name ~= wanted)
+            return a.name == wanted
+                and b.name ~= wanted
         end)
 
         for _, card in ipairs(cards) do
-            if count >= MAX then break end
+            if count >= MAX or not alive() then
+                break
+            end
 
             if not usedButtons[card.button] then
                 local list = ids[card.name] or {}
 
                 if card.name == wanted then
                     table.sort(list, function(a, b)
-                        return a == requestId and b ~= requestId
+                        return a == requestId
+                            and b ~= requestId
                     end)
                 end
 
                 for _, id in ipairs(list) do
-                    if count >= MAX then break end
+                    if count >= MAX then
+                        break
+                    end
 
                     if not used[id] then
                         if press(card.button) then
@@ -390,12 +463,14 @@ local function collectCycle(requestId)
                             count = count + 1
 
                             status(
-                                "Collect " .. count .. "/" .. MAX
-                                .. ": " .. card.name
+                                "Collect " .. count
+                                .. "/" .. MAX
+                                .. " " .. card.name
                             )
 
                             send(
-                                "🥚 สั่ง Collect " .. count .. "/" .. MAX
+                                "🥚 สั่ง Collect "
+                                .. count .. "/" .. MAX
                                 .. "\n" .. card.name
                             )
                         end
@@ -405,14 +480,14 @@ local function collectCycle(requestId)
                 end
             end
 
-            task.wait(.3)
+            task.wait(0.3)
         end
 
         if count == 0 then
             send("⚠️ ไม่พบปุ่ม Collect ใน Map Eggs")
         end
 
-        -- 4. รอไข่หาย
+        -- 4. รอไข่ที่สั่ง Collect หายครบ
         local remaining = count
         local elapsed = 0
 
@@ -436,17 +511,21 @@ local function collectCycle(requestId)
             end
         end
 
-        if not alive() then return end
+        if not alive() then
+            return
+        end
 
-        local collectedAll = count > 0 and remaining == 0
+        local collectedAll =
+            count > 0 and remaining == 0
 
-        -- 5. รอ 10 วินาที
+        -- 5. รออีก 10 วินาที
         if collectedAll then
             status("ไข่หายครบ รอ 10 วินาที")
 
             send(
-                "✅ ไข่หายครบ " .. count
-                .. " ใบ\n⏳ รอ 10 วินาทีก่อนเปิด Event"
+                "✅ ไข่หายครบ "
+                .. count .. " ใบ"
+                .. "\n⏳ รอ 10 วินาที"
             )
 
             task.wait(REOPEN_DELAY)
@@ -460,28 +539,32 @@ local function collectCycle(requestId)
             send("⚠️ ไม่มีไข่ที่สั่ง Collect")
         end
 
-        if not alive() then return end
+        if not alive() then
+            return
+        end
 
-        -- 6. เปิด Event กลับ
+        -- 6. เปิด Halloween Event กลับ
         status("กำลังเปิด Halloween Event กลับ")
+
         local on = toggle5()
 
-        send("▶️ สั่งเปิด Halloween Event " .. on .. "/5")
-
-        -- 7. แจ้งผล
+        -- 7. ส่งผลเข้า Telegram
         if collectedAll and on == 5 then
             status("เก็บไข่สำเร็จ")
 
             send(
                 "✅ เก็บไข่สำเร็จ!\n"
                 .. "🥚 จำนวน " .. count .. " ใบ\n"
-                .. "▶️ เปิด Halloween Event กลับแล้ว 5/5"
+                .. "▶️ สั่งเปิด Halloween Event กลับ "
+                .. on .. "/5"
             )
         else
             send(
                 "⚠️ จบกระบวนการเก็บไข่\n"
-                .. "ไข่หายครบ: " .. tostring(collectedAll)
-                .. "\nสั่งเปิด Event: " .. on .. "/5"
+                .. "ไข่หายครบ: "
+                .. tostring(collectedAll)
+                .. "\nสั่งเปิด Event: "
+                .. on .. "/5"
             )
         end
     end
@@ -496,7 +579,7 @@ local function collectCycle(requestId)
     busy = false
 end
 
--- เชื่อมต่อ Telegram
+-- ตรวจสอบ Telegram
 local bot, botErr = api("getMe", {})
 
 if not bot then
@@ -523,9 +606,10 @@ for _, u in ipairs(init.result or {}) do
 end
 
 status("EGG MONITOR เริ่มทำงาน")
+
 send("🟢 Ride A Pet Egg Monitor เริ่มทำงาน")
 
--- รับปุ่มจาก Telegram
+-- รับปุ่ม Telegram
 task.spawn(function()
     while alive() do
         local data, err = api("getUpdates", {
@@ -537,7 +621,10 @@ task.spawn(function()
 
         if data then
             for _, u in ipairs(data.result or {}) do
-                offset = math.max(offset, u.update_id + 1)
+                offset = math.max(
+                    offset,
+                    u.update_id + 1
+                )
 
                 local cb = u.callback_query
 
@@ -569,7 +656,7 @@ task.spawn(function()
     end
 end)
 
--- ตรวจหาไข่ใหม่
+-- ตรวจไข่ใหม่
 task.spawn(function()
     while alive() do
         for _, e in ipairs(A:GetChildren()) do
