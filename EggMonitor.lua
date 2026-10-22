@@ -77,7 +77,7 @@ if old then old:Destroy() end
 local gui = Instance.new("ScreenGui")
 gui.Name = "RideEggStatus"
 gui.ResetOnSpawn = false
-gui.Parent = P.PlayerGui
+gui.Parent = nil
 
 local label = Instance.new("TextLabel")
 label.Size = UDim2.fromOffset(350, 115)
@@ -90,10 +90,7 @@ label.Text = "กำลังเชื่อมต่อ Telegram..."
 label.Parent = gui
 
 local function status(t)
-    if label.Parent then
-        label.Text = t
-    end
-    notify(t)
+
 end
 
 local API = "https://api.telegram.org/bot" .. TOKEN
