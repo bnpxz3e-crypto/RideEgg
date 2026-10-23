@@ -37,7 +37,7 @@ local RUN = ENV.RideEggRun
 ENV.EggMonitorEnabled = true
 
 local MAX_COLLECT = 2
-local MAP_WAIT = 10
+local MAP_WAIT = 2
 local REOPEN_DELAY = 10
 local COLLECT_TIMEOUT = 300
 
@@ -442,12 +442,8 @@ local function announce(e)
 
     local weight = getWeight(name)
 
-    -- ลองอ่านซ้ำหากยังไม่พบ
-    for _ = 1, 5 do
-        if weight then break end
-        task.wait(2)
-        weight = getWeight(name)
-    end
+    -- ส่งทันทีหลังรอ 2 วินาที ไม่รอ KG ซ้ำอีก 10 วินาที
+    -- หาก Map Eggs ยังไม่อัปเดต จะแจ้ง KG ว่ากำลังอัปเดต
 
     if not alive()
         or not ENV.EggMonitorEnabled
@@ -457,7 +453,7 @@ local function announce(e)
 
     local caption =
         info.emoji .. " พบ " .. name
-        .. "\n⚖️ KG: " .. (weight or "ไม่ทราบ")
+        .. "\n⚖️ KG: " .. (weight or "กำลังอัปเดต")
         .. "\n🥚 กดปุ่มเพื่อเก็บไข่"
 
     local keyboard = {
