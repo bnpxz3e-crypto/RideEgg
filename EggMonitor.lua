@@ -187,22 +187,31 @@ local cycle=0
 local warned={DAY=false,NIGHT=false}
 local pendingReset={}
 local function elapsedText(record)
- local elapsed=math.max(0,math.floor((os.time()-(record.spawnedAt or os.time()))/60))
- return "⏱️ เกิดมาแล้ว: "..elapsed.." นาที"
+ local elapsed=math.max(0,os.time()-(record.spawnedAt or os.time()))
+ local days=math.floor(elapsed/86400)
+ local hours=math.floor(elapsed%86400/3600)
+ local minutes=math.floor(elapsed%3600/60)
+ if days>0 then
+  return string.format("⏱️ เกิดมาแล้ว: %d วัน %d ชั่วโมง %d นาที",days,hours,minutes)
+ elseif hours>0 then
+  return string.format("⏱️ เกิดมาแล้ว: %d ชั่วโมง %d นาที",hours,minutes)
+ end
+ return string.format("⏱️ เกิดมาแล้ว: %d นาที",minutes)
 end
 local function captionFor(record,status)
  local item=EGGS[record.name]
  return item.icon.." พบ "..record.name.."\n⚖️ น้ำหนัก: "..(record.weight or "กำลังอัปเดต").."\n"..elapsedText(record).."\n"..(status or "🥚 กดปุ่มเพื่อเก็บไข่")
 end
 local function editEggMessage(record,status)
- if not record.messageId then return end
+ if not record.messageId then return false end
+ status=status or record.finalStatus
  local payload={chat_id=CHAT,message_id=record.messageId}
  if record.isPhoto then
   payload.caption=captionFor(record,status)
-  api("editMessageCaption",payload)
+  return api("editMessageCaption",payload) ~= nil
  else
   payload.text=captionFor(record,status)
-  api("editMessageText",payload)
+  return api("editMessageText",payload) ~= nil
  end
 end
 local function finalize(record,status)
@@ -419,7 +428,7 @@ task.spawn(function()
     if EGGS[name] then
      local id=e.Name
      present[id]=true
-     if not tracked[id] or tracked[id].state~="active" and tracked[id].state~="await-reset" then
+     if not tracked[id] then
       tracked[id]={id=id,name=name,state="active",cycle=cycle,spawnedAt=os.time(),lastEditMinute=0}
       task.spawn(announce,e,tracked[id])
      end
@@ -428,15 +437,6 @@ task.spawn(function()
    -- Detect time transition first; classify eggs missing at sunrise as reset.
    local sunrise=(lastPhase=="NIGHT" and phase=="DAY")
    detectTime()
-   for id,record in pairs(tracked) do
-    if record.state=="active" and present[id] and record.messageId then
-     local minute=math.floor(math.max(0,os.time()-(record.spawnedAt or os.time()))/60)
-     if minute>0 and minute~=record.lastEditMinute then
-      record.lastEditMinute=minute
-      task.spawn(editEggMessage,record)
-     end
-    end
-   end
    for id,record in pairs(tracked) do
     if record.state=="active" and not present[id] then
      if sunrise and record.cycle<cycle and not pending[id] then
@@ -450,6 +450,25 @@ task.spawn(function()
    end
   end
   task.wait(1)
+ end
+end)
+
+-- Keep counting even after collection, reset, or manual OFF.
+-- Edit the original message only; no new Telegram message per minute.
+task.spawn(function()
+ while alive() do
+  for _,record in pairs(tracked) do
+   if not alive() then break end
+   if record.messageId then
+    local minute=math.floor(math.max(0,os.time()-(record.spawnedAt or os.time()))/60)
+    if minute ~= record.lastEditMinute then
+     if editEggMessage(record) then
+      record.lastEditMinute=minute
+     end
+    end
+   end
+  end
+  task.wait(5)
  end
 end)
 
