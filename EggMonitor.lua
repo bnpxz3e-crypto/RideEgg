@@ -6,10 +6,13 @@ local CHAT = "1813392489"
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local HS = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
 
 local P = Players.LocalPlayer
-local ROOTS = {P:WaitForChild("PlayerGui"), game.CoreGui}
+local PG = P:WaitForChild("PlayerGui")
 local A = RS:WaitForChild("ServerData"):WaitForChild("ActiveEggs")
+
+local ROOTS = {PG, CoreGui}
 
 local H = (syn and syn.request)
     or (http and http.request)
@@ -19,14 +22,9 @@ local H = (syn and syn.request)
 local MAX = 2
 local TIMEOUT = 300
 local REOPEN_DELAY = 10
-
-local switches = {
-    "Auto Collect Candy",
-    "Auto Search Pumpkins",
-    "Auto Trick Or Treat",
-    "Auto Halloween Ritual",
-    "Collect Rare Eggs First"
-}
+local MAP_WAIT = 10
+local WEIGHT_RETRIES = 10
+local PHOTO_RETRIES = 3
 
 local eggs = {
     ["Volcanic Egg"] = {
@@ -43,40 +41,145 @@ local eggs = {
     }
 }
 
-if not H then
-    warn("ไม่พบ HTTP request")
-    return
-end
+local switches = {
+    "Auto Collect Candy",
+    "Auto Search Pumpkins",
+    "Auto Trick Or Treat",
+    "Auto Halloween Ritual",
+    "Collect Rare Eggs First"
+}
 
-if TOKEN == "" or TOKEN == "PUT_YOUR_BOT_TOKEN_HERE" then
-    warn("กรุณาใส่ Telegram Bot Token")
-    return
-end
-
--- หยุดสคริปต์เวอร์ชันก่อน
 local ENV = getgenv()
 ENV.RideEggRun = (ENV.RideEggRun or 0) + 1
-
 local RUN = ENV.RideEggRun
+
+local enabled = false
+local busy = false
+local offset = 0
+local initialized = false
+local seenEggs = {}
 
 local function alive()
     return ENV.RideEggRun == RUN
 end
 
--- ไม่มี GUI และไม่มี Notification กลางจอ
-local function status(t)
-    print("[RIDE EGG] " .. tostring(t))
+local function active()
+    return alive() and enabled
 end
 
--- ลบหน้าต่างสถานะเก่าของสคริปต์
-local old = P.PlayerGui:FindFirstChild("RideEggStatus")
+-- =============================
+-- UI
+-- =============================
+
+local old = PG:FindFirstChild("RideEggChilliControl")
 if old then
     old:Destroy()
 end
 
+local gui = Instance.new("ScreenGui")
+gui.Name = "RideEggChilliControl"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 900
+gui.Parent = PG
+
+local function corner(obj, radius)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, radius)
+    c.Parent = obj
+end
+
+local chilli = Instance.new("TextButton")
+chilli.Name = "ChilliButton"
+chilli.Size = UDim2.fromOffset(55, 55)
+chilli.Position = UDim2.new(0, 12, 0.45, 0)
+chilli.BackgroundColor3 = Color3.fromRGB(200, 43, 30)
+chilli.Text = "🌶️"
+chilli.TextSize = 30
+chilli.TextColor3 = Color3.new(1, 1, 1)
+chilli.Active = true
+chilli.Draggable = true
+chilli.Parent = gui
+corner(chilli, 14)
+
+local panel = Instance.new("Frame")
+panel.Name = "ControlPanel"
+panel.Size = UDim2.fromOffset(310, 220)
+panel.Position = UDim2.new(0.5, -155, 0.5, -110)
+panel.BackgroundColor3 = Color3.fromRGB(23, 23, 27)
+panel.BorderSizePixel = 0
+panel.Visible = false
+panel.Parent = gui
+corner(panel, 12)
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -65, 0, 45)
+title.Position = UDim2.fromOffset(12, 3)
+title.BackgroundTransparency = 1
+title.Text = "🌶️ EGG MONITOR"
+title.TextColor3 = Color3.new(1, 1, 1)
+title.TextSize = 20
+title.Font = Enum.Font.GothamBold
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = panel
+
+local close = Instance.new("TextButton")
+close.Size = UDim2.fromOffset(38, 36)
+close.Position = UDim2.new(1, -45, 0, 7)
+close.BackgroundColor3 = Color3.fromRGB(210, 50, 45)
+close.Text = "X"
+close.TextSize = 23
+close.TextColor3 = Color3.new(1, 1, 1)
+close.Parent = panel
+corner(close, 8)
+
+local toggle = Instance.new("TextButton")
+toggle.Size = UDim2.new(1, -24, 0, 48)
+toggle.Position = UDim2.fromOffset(12, 55)
+toggle.BackgroundColor3 = Color3.fromRGB(125, 45, 45)
+toggle.Text = "🔴 ระบบปิด OFF"
+toggle.TextSize = 20
+toggle.TextColor3 = Color3.new(1, 1, 1)
+toggle.Font = Enum.Font.GothamBold
+toggle.Parent = panel
+corner(toggle, 8)
+
+local info = Instance.new("TextLabel")
+info.Size = UDim2.new(1, -24, 0, 100)
+info.Position = UDim2.fromOffset(12, 112)
+info.BackgroundTransparency = 1
+info.TextColor3 = Color3.new(1, 1, 1)
+info.TextSize = 15
+info.TextWrapped = true
+info.TextYAlignment = Enum.TextYAlignment.Top
+info.Text = "ระบบปิดอยู่"
+info.Parent = panel
+
+local function status(t)
+    if alive() and info.Parent then
+        info.Text = t
+    end
+end
+
+chilli.MouseButton1Click:Connect(function()
+    panel.Visible = not panel.Visible
+end)
+
+close.MouseButton1Click:Connect(function()
+    panel.Visible = false
+end)
+
+-- =============================
+-- TELEGRAM
+-- =============================
+
 local API = "https://api.telegram.org/bot" .. TOKEN
 
 local function api(method, body)
+    if not H then
+        return nil, "HTTP request unavailable"
+    end
+
     local ok, res = pcall(function()
         return H({
             Url = API .. "/" .. method,
@@ -115,11 +218,15 @@ local function send(t)
 end
 
 local function photoUrl(id)
+    if not H then return nil end
+
     local ok, res = pcall(function()
         return H({
             Url = "https://thumbnails.roblox.com/v1/assets"
                 .. "?assetIds=" .. id
-                .. "&size=420x420&format=Png&isCircular=false",
+                .. "&size=420x420"
+                .. "&format=Png"
+                .. "&isCircular=false",
             Method = "GET"
         })
     end)
@@ -138,39 +245,44 @@ local function photoUrl(id)
 
     local item = data.data and data.data[1]
 
-    if item and item.state == "Completed" then
+    if item
+        and item.state == "Completed"
+        and item.imageUrl
+        and item.imageUrl ~= "" then
         return item.imageUrl
     end
 
     return nil
 end
 
--- กดปุ่ม GUI
+-- =============================
+-- CHILLI HUB BUTTONS
+-- =============================
+
 local function press(b)
     if not b or not b:IsA("GuiButton") then
         return false
     end
 
-    local n = 0
+    local count = 0
 
     pcall(function()
         for _, c in ipairs(getconnections(b.Activated)) do
             if c.Function then
                 c.Function()
-                n = n + 1
+                count = count + 1
             end
         end
     end)
 
-    return n > 0
+    return count > 0
 end
 
--- หา Halloween Event Switch
 local function findSwitch(name)
     for _, root in ipairs(ROOTS) do
         local frame = root:FindFirstChild(name, true)
 
-        if frame then
+        if frame and frame:IsA("Frame") then
             local sw = frame:FindFirstChild("Switch", true)
             local b = sw and sw:FindFirstChild("Button", true)
 
@@ -184,60 +296,52 @@ local function findSwitch(name)
 end
 
 local function toggle5()
-    local n = 0
+    local count = 0
 
     for _, name in ipairs(switches) do
-        if not alive() then
-            break
-        end
-
         if press(findSwitch(name)) then
-            n = n + 1
+            count = count + 1
         end
 
         task.wait(0.3)
     end
 
-    return n
+    return count
 end
 
--- หา Map Eggs Card
+-- =============================
+-- MAP EGGS
+-- =============================
+
 local function getCards()
     local cards = {}
     local seen = {}
 
     for _, root in ipairs(ROOTS) do
         for _, v in ipairs(root:GetDescendants()) do
-            if v:IsA("TextLabel") then
-                local name = v.Text
+            if v:IsA("TextLabel") and eggs[v.Text] then
+                local parent = v.Parent
 
-                if eggs[name] then
-                    local parent = v.Parent
+                for _ = 1, 5 do
+                    if not parent then break end
 
-                    for _ = 1, 5 do
-                        if not parent then
-                            break
+                    local b = parent:FindFirstChild("Open")
+
+                    if b and b:IsA("GuiButton") then
+                        if not seen[b] then
+                            seen[b] = true
+
+                            table.insert(cards, {
+                                name = v.Text,
+                                button = b,
+                                label = v
+                            })
                         end
 
-                        local b = parent:FindFirstChild("Open")
-
-                        if b and b:IsA("GuiButton") then
-                            if not seen[b] then
-                                seen[b] = true
-
-                                table.insert(cards, {
-                                    name = name,
-                                    button = b,
-                                    label = v,
-                                    container = parent
-                                })
-                            end
-
-                            break
-                        end
-
-                        parent = parent.Parent
+                        break
                     end
+
+                    parent = parent.Parent
                 end
             end
         end
@@ -246,39 +350,27 @@ local function getCards()
     return cards
 end
 
--- อ่านน้ำหนักจากการ์ดที่ตรงกับไข่
-local function readWeight(name)
+local function getWeight(name)
     for _, card in ipairs(getCards()) do
         if card.name == name then
-            local parent = card.container
+            local parent = card.label.Parent
 
             for _ = 1, 5 do
-                if not parent then
-                    break
-                end
+                if not parent then break end
 
-                local w = parent:FindFirstChild("EggWeight", true)
+                local w = parent:FindFirstChild(
+                    "EggWeight", true
+                )
 
                 if w and w:IsA("TextLabel") then
-                    local value = w.Text
+                    local text = w.Text
 
-                    if value and value ~= ""
-                        and value:lower():find("kg", 1, true) then
-                        return value
-                    end
-                end
-
-                -- สำรอง: ค้นหา TextLabel ที่มี KG
-                for _, x in ipairs(parent:GetDescendants()) do
-                    if x:IsA("TextLabel")
-                        and x ~= card.label then
-
-                        local value = x.Text
-
-                        if value
-                            and value:lower():find("kg", 1, true) then
-                            return value
-                        end
+                    if text
+                        and text ~= ""
+                        and text:lower():find(
+                            "kg", 1, true
+                        ) then
+                        return text
                     end
                 end
 
@@ -290,26 +382,6 @@ local function readWeight(name)
     return nil
 end
 
--- รอให้ GUI โหลดน้ำหนัก
-local function getWeight(name)
-    for attempt = 1, 12 do
-        if not alive() then
-            return "ไม่ทราบ"
-        end
-
-        local weight = readWeight(name)
-
-        if weight then
-            return weight
-        end
-
-        task.wait(0.5)
-    end
-
-    return "ไม่ทราบ"
-end
-
--- รายการไข่ที่ยังอยู่ใน ActiveEggs
 local function getIds()
     local ids = {}
 
@@ -325,31 +397,51 @@ local function getIds()
     return ids
 end
 
-local seenEggs = {}
-local busy = false
+-- =============================
+-- EGG ANNOUNCEMENT
+-- =============================
 
--- แจ้งเตือนพบไข่
 local function announce(e)
-    if not alive() or not e.Parent then
+    if not active() or not e.Parent then
         return
     end
 
     local name = e:GetAttribute("Egg")
-    local info = eggs[name]
+    local egg = eggs[name]
 
-    if not info then
+    if not egg then return end
+
+    -- รอ Map Eggs โหลดก่อน 10 วินาที
+    status("🥚 พบ " .. name .. "\n⏳ รอ Map Eggs 10 วินาที")
+
+    task.wait(MAP_WAIT)
+
+    if not active() or not e.Parent then
         return
     end
 
-    local weight = getWeight(name)
+    -- อ่าน KG ซ้ำอีกสูงสุด 10 วินาที
+    local weight
 
-    if not alive() or not e.Parent then
-        return
+    for i = 1, WEIGHT_RETRIES do
+        if not active() or not e.Parent then
+            return
+        end
+
+        weight = getWeight(name)
+
+        if weight then
+            break
+        end
+
+        if i < WEIGHT_RETRIES then
+            task.wait(1)
+        end
     end
 
     local caption =
-        info.emoji .. " พบ " .. name
-        .. "\n⚖️ KG: " .. weight
+        egg.emoji .. " พบ " .. name
+        .. "\n⚖️ KG: " .. (weight or "ไม่ทราบ")
         .. "\n🥚 กดปุ่มเพื่อเก็บไข่"
 
     local keyboard = {
@@ -361,19 +453,34 @@ local function announce(e)
         }}
     }
 
-    local url = photoUrl(info.id)
-    local result
+    -- ส่งรูปซ้ำสูงสุด 3 ครั้ง
+    for i = 1, PHOTO_RETRIES do
+        if not active() or not e.Parent then
+            return
+        end
 
-    if url then
-        result = api("sendPhoto", {
-            chat_id = CHAT,
-            photo = url,
-            caption = caption,
-            reply_markup = keyboard
-        })
+        local url = photoUrl(egg.id)
+
+        if url then
+            local result = api("sendPhoto", {
+                chat_id = CHAT,
+                photo = url,
+                caption = caption,
+                reply_markup = keyboard
+            })
+
+            if result then
+                return
+            end
+        end
+
+        if i < PHOTO_RETRIES then
+            task.wait(2)
+        end
     end
 
-    if not result then
+    -- ส่งข้อความแทนหากรูปยังไม่พร้อม
+    if active() and e.Parent then
         api("sendMessage", {
             chat_id = CHAT,
             text = caption,
@@ -382,16 +489,25 @@ local function announce(e)
     end
 end
 
--- เก็บไข่ตามคำสั่ง Telegram
+-- =============================
+-- COLLECT PROCESS
+-- =============================
+
 local function collectCycle(requestId)
     if busy then
         send("⏳ กำลังเก็บไข่รอบก่อนอยู่")
         return
     end
 
+    if not enabled then
+        send("🔴 ระบบปิดอยู่")
+        return
+    end
+
     local chosen = A:FindFirstChild(requestId)
 
-    if not chosen or not eggs[chosen:GetAttribute("Egg")] then
+    if not chosen
+        or not eggs[chosen:GetAttribute("Egg")] then
         send("⚠️ ไข่จากปุ่มนี้หายไปแล้ว")
         return
     end
@@ -401,17 +517,10 @@ local function collectCycle(requestId)
     local function run()
         local wanted = chosen:GetAttribute("Egg")
 
-        -- 1. แจ้งว่ากำลังไปเก็บไข่
-        status("กำลังไปเก็บไข่ " .. wanted)
+        status("🥚 กำลังไปเก็บไข่ " .. wanted)
+        send("🥚 กำลังไปเก็บไข่\n" .. wanted)
 
-        send(
-            "🥚 กำลังไปเก็บไข่\n"
-            .. wanted
-        )
-
-        -- 2. ปิด Halloween Event
-        status("กำลังปิด Halloween Event")
-
+        -- ปิด Halloween Event
         local off = toggle5()
 
         send(
@@ -421,24 +530,22 @@ local function collectCycle(requestId)
 
         task.wait(1)
 
-        -- 3. Collect สูงสุด 2 ใบ
+        -- Collect สูงสุด 2 ใบ
         local ids = getIds()
         local cards = getCards()
-
-        local watching = {}
-        local used = {}
-        local usedButtons = {}
-        local count = 0
 
         table.sort(cards, function(a, b)
             return a.name == wanted
                 and b.name ~= wanted
         end)
 
+        local watching = {}
+        local used = {}
+        local usedButtons = {}
+        local count = 0
+
         for _, card in ipairs(cards) do
-            if count >= MAX or not alive() then
-                break
-            end
+            if count >= MAX then break end
 
             if not usedButtons[card.button] then
                 local list = ids[card.name] or {}
@@ -451,10 +558,6 @@ local function collectCycle(requestId)
                 end
 
                 for _, id in ipairs(list) do
-                    if count >= MAX then
-                        break
-                    end
-
                     if not used[id] then
                         if press(card.button) then
                             used[id] = true
@@ -463,9 +566,8 @@ local function collectCycle(requestId)
                             count = count + 1
 
                             status(
-                                "Collect " .. count
-                                .. "/" .. MAX
-                                .. " " .. card.name
+                                "🥚 Collect "
+                                .. count .. "/" .. MAX
                             )
 
                             send(
@@ -487,7 +589,7 @@ local function collectCycle(requestId)
             send("⚠️ ไม่พบปุ่ม Collect ใน Map Eggs")
         end
 
-        -- 4. รอไข่ที่สั่ง Collect หายครบ
+        -- รอไข่หาย
         local remaining = count
         local elapsed = 0
 
@@ -505,64 +607,49 @@ local function collectCycle(requestId)
 
                     send(
                         "🥚 ไข่หาย: " .. name
-                        .. "\nเหลือ " .. remaining .. " ใบ"
+                        .. "\nเหลือ "
+                        .. remaining .. " ใบ"
                     )
                 end
             end
         end
 
-        if not alive() then
-            return
-        end
-
-        local collectedAll =
+        local success =
             count > 0 and remaining == 0
 
-        -- 5. รออีก 10 วินาที
-        if collectedAll then
-            status("ไข่หายครบ รอ 10 วินาที")
-
-            send(
-                "✅ ไข่หายครบ "
-                .. count .. " ใบ"
-                .. "\n⏳ รอ 10 วินาที"
-            )
-
+        -- รอ 10 วินาทีหลังไข่หายครบ
+        if success then
+            status("⏳ ไข่หายครบ รอ 10 วินาที")
             task.wait(REOPEN_DELAY)
-
         elseif remaining > 0 then
             send(
                 "⚠️ ครบ 5 นาที ยังเหลือ "
                 .. remaining .. " ใบ"
             )
-        else
-            send("⚠️ ไม่มีไข่ที่สั่ง Collect")
         end
 
-        if not alive() then
-            return
-        end
-
-        -- 6. เปิด Halloween Event กลับ
-        status("กำลังเปิด Halloween Event กลับ")
-
+        -- เปิด Halloween Event กลับ
         local on = toggle5()
 
-        -- 7. ส่งผลเข้า Telegram
-        if collectedAll and on == 5 then
-            status("เก็บไข่สำเร็จ")
+        if success and on == 5 then
+            status("✅ เก็บไข่สำเร็จ")
 
             send(
-                "✅ เก็บไข่สำเร็จ!\n"
-                .. "🥚 จำนวน " .. count .. " ใบ\n"
-                .. "▶️ สั่งเปิด Halloween Event กลับ "
-                .. on .. "/5"
+                "✅ เก็บไข่สำเร็จ!"
+                .. "\n🥚 จำนวน "
+                .. count .. " ใบ"
+                .. "\n▶️ เปิด Halloween Event กลับแล้ว 5/5"
             )
         else
+            status(
+                "⚠️ จบกระบวนการ Event "
+                .. on .. "/5"
+            )
+
             send(
-                "⚠️ จบกระบวนการเก็บไข่\n"
-                .. "ไข่หายครบ: "
-                .. tostring(collectedAll)
+                "⚠️ จบกระบวนการเก็บไข่"
+                .. "\nไข่หายครบ: "
+                .. tostring(success)
                 .. "\nสั่งเปิด Event: "
                 .. on .. "/5"
             )
@@ -572,99 +659,135 @@ local function collectCycle(requestId)
     local ok, err = pcall(run)
 
     if not ok then
-        status("ERROR: " .. tostring(err))
-        send("❌ เกิดข้อผิดพลาด: " .. tostring(err))
+        status("❌ " .. tostring(err))
+        send("❌ ERROR: " .. tostring(err))
     end
 
     busy = false
 end
 
--- ตรวจสอบ Telegram
-local bot, botErr = api("getMe", {})
+-- =============================
+-- TELEGRAM POLLING
+-- =============================
 
-if not bot then
-    status("BOT ERROR: " .. tostring(botErr))
-    return
-end
-
--- อ่าน Update เก่าก่อนเริ่ม
-local offset = 0
-
-local init, initErr = api("getUpdates", {
-    timeout = 0,
-    limit = 100,
-    allowed_updates = {"callback_query"}
-})
-
-if not init then
-    status("GET UPDATES ERROR: " .. tostring(initErr))
-    return
-end
-
-for _, u in ipairs(init.result or {}) do
-    offset = math.max(offset, u.update_id + 1)
-end
-
-status("EGG MONITOR เริ่มทำงาน")
-
-send("🟢 Ride A Pet Egg Monitor เริ่มทำงาน")
-
--- รับปุ่ม Telegram
 task.spawn(function()
     while alive() do
-        local data, err = api("getUpdates", {
-            offset = offset,
-            timeout = 0,
-            limit = 100,
-            allowed_updates = {"callback_query"}
-        })
+        if enabled then
+            if not initialized then
+                local data, err = api("getUpdates", {
+                    timeout = 0,
+                    limit = 100,
+                    allowed_updates = {
+                        "callback_query"
+                    }
+                })
 
-        if data then
-            for _, u in ipairs(data.result or {}) do
-                offset = math.max(
-                    offset,
-                    u.update_id + 1
-                )
-
-                local cb = u.callback_query
-
-                if cb and type(cb.data) == "string" then
-                    local chat = cb.message
-                        and cb.message.chat
-                        and tostring(cb.message.chat.id)
-
-                    if chat == CHAT
-                        and cb.data:sub(1, 1) == "C" then
-
-                        api("answerCallbackQuery", {
-                            callback_query_id = cb.id,
-                            text = "กำลังไปเก็บไข่"
-                        })
-
-                        task.spawn(
-                            collectCycle,
-                            cb.data:sub(2)
+                if data then
+                    for _, u in ipairs(
+                        data.result or {}
+                    ) do
+                        offset = math.max(
+                            offset,
+                            u.update_id + 1
                         )
                     end
+
+                    initialized = true
+
+                    status(
+                        "🟢 ระบบเปิด\nรอไข่และคำสั่ง Telegram"
+                    )
+
+                    send(
+                        "🟢 Ride A Pet Egg Monitor เริ่มทำงาน"
+                    )
+                else
+                    status(
+                        "❌ Telegram: "
+                        .. tostring(err)
+                    )
+                end
+            else
+                local data, err = api("getUpdates", {
+                    offset = offset,
+                    timeout = 0,
+                    limit = 100,
+                    allowed_updates = {
+                        "callback_query"
+                    }
+                })
+
+                if data then
+                    for _, u in ipairs(
+                        data.result or {}
+                    ) do
+                        offset = math.max(
+                            offset,
+                            u.update_id + 1
+                        )
+
+                        local cb = u.callback_query
+
+                        if cb
+                            and type(cb.data) == "string" then
+
+                            local chat = cb.message
+                                and cb.message.chat
+                                and tostring(
+                                    cb.message.chat.id
+                                )
+
+                            if chat == CHAT
+                                and cb.data:sub(1, 1) == "C" then
+
+                                api(
+                                    "answerCallbackQuery",
+                                    {
+                                        callback_query_id = cb.id,
+                                        text = "กำลังไปเก็บไข่"
+                                    }
+                                )
+
+                                task.spawn(
+                                    collectCycle,
+                                    cb.data:sub(2)
+                                )
+                            end
+                        end
+                    end
+                else
+                    status(
+                        "⚠️ Telegram: "
+                        .. tostring(err)
+                    )
                 end
             end
-        else
-            status("Telegram ERROR: " .. tostring(err))
         end
 
         task.wait(2)
     end
 end)
 
--- ตรวจไข่ใหม่
+-- =============================
+-- EGG MONITOR
+-- =============================
+
+-- ข้ามไข่ที่มีอยู่ก่อนเริ่มสคริปต์
+for _, e in ipairs(A:GetChildren()) do
+    seenEggs[e.Name] = true
+end
+
 task.spawn(function()
     while alive() do
         for _, e in ipairs(A:GetChildren()) do
-            local name = e:GetAttribute("Egg")
-
-            if eggs[name] and not seenEggs[e.Name] then
+            if not seenEggs[e.Name] then
                 seenEggs[e.Name] = true
-                task.spawn(announce, e)
+
+                local name = e:GetAttribute("Egg")
+
+                if enabled and eggs[name] then
+                    task.spawn(announce, e)
+                end
             end
         end
 
@@ -672,3 +795,51 @@ task.spawn(function()
     end
 end)
 
+-- =============================
+-- ON / OFF SWITCH
+-- =============================
+
+toggle.MouseButton1Click:Connect(function()
+    if not alive() then return end
+
+    if busy then
+        status(
+            "⏳ กำลังเก็บไข่\nกรุณารอให้จบรอบก่อน"
+        )
+        return
+    end
+
+    if not enabled then
+        if TOKEN == "PUT_YOUR_NEW_BOT_TOKEN_HERE"
+            or TOKEN == "" then
+
+            status("❌ กรุณาใส่ Bot Token")
+            return
+        end
+
+        if not H then
+            status("❌ ไม่พบ HTTP request")
+            return
+        end
+
+        enabled = true
+
+        toggle.Text = "🟢 ระบบเปิด ON"
+        toggle.BackgroundColor3 =
+            Color3.fromRGB(30, 135, 75)
+
+        status(
+            "🟢 ระบบเปิด\nกำลังเชื่อมต่อ Telegram..."
+        )
+    else
+        enabled = false
+
+        toggle.Text = "🔴 ระบบปิด OFF"
+        toggle.BackgroundColor3 =
+            Color3.fromRGB(125, 45, 45)
+
+        status("🔴 ระบบปิดแล้ว")
+    end
+end)
+
+status("🌶️ กดปุ่ม ON เพื่อเริ่มระบบ")
