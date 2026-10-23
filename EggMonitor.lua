@@ -186,6 +186,29 @@ local lastPhase,lastSeconds=nil,nil
 local cycle=0
 local warned={DAY=false,NIGHT=false}
 local pendingReset={}
+local function elapsedText(record)
+ local elapsed=math.max(0,math.floor((os.time()-(record.spawnedAt or os.time()))/60))
+ return "⏱️ เกิดมาแล้ว: "..elapsed.." นาที"
+end
+local function captionFor(record,status)
+ local item=EGGS[record.name]
+ return item.icon.." พบ "..record.name.."\n⚖️ น้ำหนัก: "..(record.weight or "กำลังอัปเดต").."\n"..elapsedText(record).."\n"..(status or "🥚 กดปุ่มเพื่อเก็บไข่")
+end
+local function editEggMessage(record,status)
+ if not record.messageId then return end
+ local payload={chat_id=CHAT,message_id=record.messageId}
+ if record.isPhoto then
+  payload.caption=captionFor(record,status)
+  api("editMessageCaption",payload)
+ else
+  payload.text=captionFor(record,status)
+  api("editMessageText",payload)
+ end
+end
+local function finalize(record,status)
+ record.finalStatus=status
+ if record.messageId then editEggMessage(record,status) end
+end
 
 local function eggName(e) return e:GetAttribute("Egg") end
 local function describe(r) return (EGGS[r.name] and EGGS[r.name].icon or "🥚").." "..r.name end
@@ -193,15 +216,25 @@ local function announce(e,record)
  task.wait(2)
  if not alive() or not env.EggMonitorEnabled or not e.Parent or record.state~="active" then return end
  local item=EGGS[record.name]
- local caption=item.icon.." พบ "..record.name.."\n⚖️ น้ำหนัก: "..weightOf(record.name).."\n🥚 กดปุ่มเพื่อเก็บไข่"
+ record.weight=weightOf(record.name)
  local keyboard={inline_keyboard={{{text="🥚 เก็บไข่",callback_data="C"..record.id}}}}
  local url=thumbnail(item.asset)
- local res=url and api("sendPhoto",{chat_id=CHAT,photo=url,caption=caption,reply_markup=keyboard})
- if not res then api("sendMessage",{chat_id=CHAT,text=caption,reply_markup=keyboard}) end
+ local res=url and api("sendPhoto",{chat_id=CHAT,photo=url,caption=captionFor(record),reply_markup=keyboard})
+ if res then
+  record.isPhoto=true
+ else
+  res=api("sendMessage",{chat_id=CHAT,text=captionFor(record),reply_markup=keyboard})
+  record.isPhoto=false
+ end
+ if res and res.result then
+  record.messageId=res.result.message_id
+  if record.finalStatus then editEggMessage(record,record.finalStatus) end
+ end
 end
 local function confirmCollected(record)
  if record.state~="active" then return end
  record.state="telegram"
+ finalize(record,"✅ เก็บไข่สำเร็จ!")
  pending[record.id]=nil
  send("✅ เก็บไข่สำเร็จ!\n"..describe(record))
 end
@@ -219,12 +252,14 @@ local function markMissing(record,phase,seconds)
   return
  end
  record.state="other"
+ finalize(record,"🥚 ไข่ถูกเก็บแล้ว (ไม่ได้เก็บผ่าน Telegram)")
  send("🥚 ไข่ถูกเก็บแล้ว (ไม่ได้เก็บผ่าน Telegram)\n"..describe(record))
 end
 local function settleReset()
  for id,record in pairs(pendingReset) do
   if record.state=="await-reset" then
    record.state="reset"
+   finalize(record,"⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว")
    send("⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว\n"..describe(record))
   end
   pendingReset[id]=nil
@@ -268,6 +303,7 @@ local function detectTime()
   for id,record in pairs(pendingReset) do
    if os.clock()-(record.missingAt or 0)>35 then
     record.state="other";pendingReset[id]=nil
+    finalize(record,"🥚 ไข่ถูกเก็บแล้ว (ไม่ได้เก็บผ่าน Telegram)")
     send("🥚 ไข่ถูกเก็บแล้ว (ไม่ได้เก็บผ่าน Telegram)\n"..describe(record))
    end
   end
@@ -384,7 +420,7 @@ task.spawn(function()
      local id=e.Name
      present[id]=true
      if not tracked[id] or tracked[id].state~="active" and tracked[id].state~="await-reset" then
-      tracked[id]={id=id,name=name,state="active",cycle=cycle}
+      tracked[id]={id=id,name=name,state="active",cycle=cycle,spawnedAt=os.time(),lastEditMinute=0}
       task.spawn(announce,e,tracked[id])
      end
     end
@@ -393,9 +429,19 @@ task.spawn(function()
    local sunrise=(lastPhase=="NIGHT" and phase=="DAY")
    detectTime()
    for id,record in pairs(tracked) do
+    if record.state=="active" and present[id] and record.messageId then
+     local minute=math.floor(math.max(0,os.time()-(record.spawnedAt or os.time()))/60)
+     if minute>0 and minute~=record.lastEditMinute then
+      record.lastEditMinute=minute
+      task.spawn(editEggMessage,record)
+     end
+    end
+   end
+   for id,record in pairs(tracked) do
     if record.state=="active" and not present[id] then
      if sunrise and record.cycle<cycle and not pending[id] then
       record.state="reset"
+      finalize(record,"⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว")
       send("⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว\n"..describe(record))
      else
       markMissing(record,phase,seconds)
