@@ -401,12 +401,49 @@ end
 -- =============================
 
 
+
 local function announce(e)
     if not active() or not e.Parent then return end
 
     local name = e:GetAttribute("Egg")
     local egg = eggs[name]
     if not egg then return end
+
+    status("🥚 พบ " .. name .. "\n⏳ รอรูปและน้ำหนัก")
+
+    -- รอ Map Eggs โหลดก่อน
+    task.wait(MAP_WAIT)
+
+    if not active() or not e.Parent then return end
+
+    -- รออ่านน้ำหนัก
+    local weight = nil
+
+    for i = 1, WEIGHT_RETRIES do
+        if not active() or not e.Parent then return end
+
+        weight = getWeight(name)
+        if weight then break end
+
+        task.wait(1)
+    end
+
+    -- รอรูปพร้อม
+    local url = nil
+
+    for i = 1, PHOTO_RETRIES do
+        if not active() or not e.Parent then return end
+
+        url = photoUrl(egg.id)
+        if url then break end
+
+        task.wait(2)
+    end
+
+    local caption =
+        egg.emoji .. " พบ " .. name
+        .. "\n⚖️ KG: " .. (weight or "ไม่ทราบ")
+        .. "\n🥚 กดปุ่มเพื่อเก็บไข่"
 
     local keyboard = {
         inline_keyboard = {{
@@ -417,70 +454,37 @@ local function announce(e)
         }}
     }
 
-    -- 1. แจ้งทันที ไม่รอรูปหรือ KG
-    local sent, err = api("sendMessage", {
-        chat_id = CHAT,
-        text = egg.emoji .. " พบ " .. name
-            .. "\n⚖️ KG: กำลังตรวจสอบ..."
-            .. "\n🥚 กดปุ่มเพื่อเก็บไข่",
-        reply_markup = keyboard
-    })
+    -- ส่งรูป + KG + ปุ่ม Collect รวมกัน
+    if url then
+        local result, err = api("sendPhoto", {
+            chat_id = CHAT,
+            photo = url,
+            caption = caption,
+            reply_markup = keyboard
+        })
 
-    if not sent then
-        status("❌ ส่ง Telegram ไม่ได้: " .. tostring(err))
-        return
-    end
-
-    status("✅ แจ้ง Telegram แล้ว: " .. name)
-
-    -- 2. รอ Map Eggs โหลด
-    task.wait(10)
-
-    if not alive() then return end
-
-    -- 3. อ่านน้ำหนักซ้ำ
-    local weight
-
-    for i = 1, 10 do
-        weight = getWeight(name)
-        if weight then break end
-        task.wait(1)
-    end
-
-    weight = weight or "ไม่ทราบ"
-
-    -- 4. อัปเดตข้อความเดิม โดยเก็บปุ่ม Collect ไว้
-    api("editMessageText", {
-        chat_id = CHAT,
-        message_id = sent.result.message_id,
-        text = egg.emoji .. " พบ " .. name
-            .. "\n⚖️ KG: " .. weight
-            .. "\n🥚 กดปุ่มเพื่อเก็บไข่",
-        reply_markup = keyboard
-    })
-
-    -- 5. ส่งรูปแยกต่างหาก
-    for i = 1, 3 do
-        local url = photoUrl(egg.id)
-
-        if url then
-            local result = api("sendPhoto", {
-                chat_id = CHAT,
-                photo = url,
-                caption = egg.emoji .. " " .. name
-                    .. "\n⚖️ KG: " .. weight
-            })
-
-            if result then
-                status("✅ ส่งรูปแล้ว: " .. name)
-                return
-            end
+        if result then
+            status("✅ แจ้ง Telegram แล้ว: " .. name)
+            return
         end
 
-        task.wait(2)
+        status("⚠️ ส่งรูปไม่สำเร็จ: " .. tostring(err))
     end
 
-    status("⚠️ แจ้งข้อความแล้ว แต่ส่งรูปไม่สำเร็จ")
+    -- กรณีรูปไม่พร้อม ส่งข้อความแทน
+    if active() and e.Parent then
+        local result, err = api("sendMessage", {
+            chat_id = CHAT,
+            text = caption,
+            reply_markup = keyboard
+        })
+
+        if result then
+            status("⚠️ ส่งข้อความแทนรูป: " .. name)
+        else
+            status("❌ Telegram: " .. tostring(err))
+        end
+    end
 end
 
 
