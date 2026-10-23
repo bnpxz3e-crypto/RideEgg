@@ -6,6 +6,7 @@ local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local HS = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
+local UIS = game:GetService("UserInputService")
 local P = Players.LocalPlayer
 local PG = P:WaitForChild("PlayerGui")
 local ROOTS = {PG, game:GetService("CoreGui")}
@@ -118,12 +119,17 @@ for i,item in ipairs(eggNames) do
     eggCards[item[1]]=x
 end
 local switchesUI={}
+local switchRows={}
 for i,name in ipairs(SWITCH_NAMES) do
     local y=193+(i-1)*28
     local row=frame(panel,UDim2.fromOffset(430,y),UDim2.fromOffset(228,26),Color3.fromRGB(14,30,48),6)
     txt(row,name,UDim2.fromOffset(7,1),UDim2.fromOffset(184,24),11,C.pale)
     local dot=frame(row,UDim2.fromOffset(204,6),UDim2.fromOffset(14,14),C.gold,7)
     switchesUI[name]=dot
+    local hit=Instance.new("TextButton")
+    hit.Name="SwitchHit"; hit.Text=""; hit.BackgroundTransparency=1
+    hit.Size=UDim2.fromScale(1,1); hit.Parent=row
+    switchRows[name]=hit
 end
 local infoBox=frame(panel,UDim2.fromOffset(22,313),UDim2.fromOffset(395,105),Color3.fromRGB(8,18,32),10,C.gold)
 txt(infoBox,"▣  สถานะการทำงาน",UDim2.fromOffset(12,7),UDim2.fromOffset(365,25),16,C.gold,true)
@@ -147,7 +153,37 @@ local function paintPower()
     if edge then edge.Color=enabled and Color3.fromRGB(82,255,164) or C.gold end
 end
 paintPower()
-eggButton.Activated:Connect(function() panel.Visible=not panel.Visible end)
+-- Drag the small egg launcher on touch screens or with a mouse.
+local dragging, dragStart, startPos, moved = false, nil, nil, false
+local function clampEgg(pos)
+    local vp=workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(800,600)
+    return UDim2.fromOffset(math.clamp(pos.X,0,math.max(0,vp.X-62)),math.clamp(pos.Y,0,math.max(0,vp.Y-62)))
+end
+eggButton.InputBegan:Connect(function(input)
+    if input.UserInputType==Enum.UserInputType.Touch or input.UserInputType==Enum.UserInputType.MouseButton1 then
+        dragging=true; moved=false; dragStart=input.Position
+        startPos=eggButton.AbsolutePosition
+    end
+end)
+UIS.InputChanged:Connect(function(input)
+    if not dragging or not dragStart then return end
+    if input.UserInputType==Enum.UserInputType.Touch or input.UserInputType==Enum.UserInputType.MouseMovement then
+        local delta=input.Position-dragStart
+        if delta.Magnitude>8 then moved=true end
+        if moved then
+            eggButton.Position=clampEgg(startPos+Vector2.new(delta.X,delta.Y))
+            glow.Position=eggButton.Position
+        end
+    end
+end)
+UIS.InputEnded:Connect(function(input)
+    if input.UserInputType==Enum.UserInputType.Touch or input.UserInputType==Enum.UserInputType.MouseButton1 then
+        if dragging then
+            dragging=false
+            if not moved then panel.Visible=not panel.Visible end
+        end
+    end
+end)
 close.Activated:Connect(function() panel.Visible=false end)
 local sendPowerNotice=function() end
 power.Activated:Connect(function()
@@ -238,6 +274,20 @@ local function findSwitch(name)
             if b and b:IsA("GuiButton") then return b end
         end
     end
+end
+-- Individual event rows can toggle the matching Chilli Hub control.
+-- Yellow = button was located, gray = not located. The game owns actual switch state.
+for name,hit in pairs(switchRows) do
+    hit.Activated:Connect(function()
+        if not alive() or busy then return end
+        local b=findSwitch(name)
+        if press(b) then
+            setDetail("⚙ สั่งสลับ "..name)
+            task.spawn(function() send("⚙ สั่งสลับกิจกรรม: "..name) end)
+        else
+            setDetail("⚠️ ไม่พบปุ่มกิจกรรม: "..name)
+        end
+    end)
 end
 local function switchGroup()
     local toggled={}
@@ -464,7 +514,7 @@ task.spawn(function()
                 local cb=u.callback_query
                 if cb and type(cb.data)=="string" then
                     local fromChat=cb.message and cb.message.chat and tostring(cb.message.chat.id)
-                    if fromChat==CHAT and cb.data:sub(1,1)=="C" then
+                    if fromChat==CHAT and enabled and cb.data:sub(1,1)=="C" then
                         api("answerCallbackQuery",{callback_query_id=cb.id,text="กำลังไปเก็บไข่"})
                         task.spawn(collectCycle,cb.data:sub(2))
                     end
