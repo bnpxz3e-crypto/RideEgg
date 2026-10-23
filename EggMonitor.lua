@@ -31,79 +31,133 @@ local EGGS = {
     ["Cherub Egg"] = {id="78949206711037", icon="👼"}
 }
 
--- UI
-local old = PG:FindFirstChild("RideEggNeon")
+-- Ornate fantasy / sci-fi UI inspired by the approved mockup.
+-- Roblox cannot display the concept illustration until it is uploaded as an image asset.
+local old=PG:FindFirstChild("RideEggNeon")
 if old then old:Destroy() end
-local ui = Instance.new("ScreenGui")
-ui.Name = "RideEggNeon"
-ui.ResetOnSpawn = false
-ui.IgnoreGuiInset = true
-ui.DisplayOrder = 250
-ui.Parent = PG
-local function corner(o,r)
-    local c=Instance.new("UICorner"); c.CornerRadius=UDim.new(0,r); c.Parent=o
+local ui=Instance.new("ScreenGui")
+ui.Name="RideEggNeon"; ui.ResetOnSpawn=false; ui.IgnoreGuiInset=true
+ui.DisplayOrder=350; ui.Parent=PG
+local C={gold=Color3.fromRGB(255,191,72),blue=Color3.fromRGB(49,179,255),
+    dark=Color3.fromRGB(7,13,27),panel=Color3.fromRGB(12,23,40),
+    pale=Color3.fromRGB(246,247,255),dim=Color3.fromRGB(160,178,203),
+    green=Color3.fromRGB(24,184,106),red=Color3.fromRGB(192,51,59)}
+local function round(o,r)
+    local x=Instance.new("UICorner"); x.CornerRadius=UDim.new(0,r); x.Parent=o
 end
-local function stroke(o,color,w)
-    local s=Instance.new("UIStroke"); s.Color=color; s.Thickness=w or 1; s.Parent=o
+local function stroke(o,c,w)
+    local x=Instance.new("UIStroke"); x.Color=c; x.Thickness=w or 1; x.Parent=o
+    return x
 end
-local function text(parent,str,size,color,bold)
-    local t=Instance.new("TextLabel")
-    t.BackgroundTransparency=1; t.Text=str; t.TextSize=size
-    t.Font=bold and Enum.Font.GothamBold or Enum.Font.Gotham
-    t.TextColor3=color; t.TextWrapped=true; t.Parent=parent
-    return t
+local function gradient(o,a,b,rot)
+    local x=Instance.new("UIGradient")
+    x.Color=ColorSequence.new(a,b); x.Rotation=rot or 0; x.Parent=o
 end
-local gold=Color3.fromRGB(255,196,70)
-local dark=Color3.fromRGB(14,18,30)
-local white=Color3.fromRGB(242,245,255)
-local eggButton=Instance.new("TextButton")
-eggButton.Name="EggMenuButton"; eggButton.Size=UDim2.fromOffset(58,58)
-eggButton.Position=UDim2.new(0,16,.36,0)
-eggButton.BackgroundColor3=dark; eggButton.Text="🥚"; eggButton.TextSize=29
- eggButton.TextColor3=white; eggButton.Parent=ui
-corner(eggButton,18); stroke(eggButton,gold,2)
-local panel=Instance.new("Frame")
-panel.Name="ControlPanel"; panel.AnchorPoint=Vector2.new(.5,.5)
-panel.Position=UDim2.fromScale(.5,.5); panel.Size=UDim2.fromOffset(320,292)
-panel.BackgroundColor3=dark; panel.Visible=true; panel.Parent=ui
-corner(panel,18); stroke(panel,gold,2)
-local gradient=Instance.new("UIGradient")
-gradient.Color=ColorSequence.new(Color3.fromRGB(27,31,53),dark)
-gradient.Rotation=90; gradient.Parent=panel
-local heading=text(panel,"🥚  EGG MONITOR",20,gold,true)
-heading.Size=UDim2.new(1,-70,0,42); heading.Position=UDim2.fromOffset(16,10)
-heading.TextXAlignment=Enum.TextXAlignment.Left
-local close=Instance.new("TextButton")
-close.Size=UDim2.fromOffset(36,36); close.Position=UDim2.new(1,-46,0,12)
-close.Text="×"; close.TextSize=28; close.Font=Enum.Font.GothamBold
-close.TextColor3=white; close.BackgroundColor3=Color3.fromRGB(183,54,66)
-close.Parent=panel; corner(close,10)
-local line=Instance.new("Frame")
-line.Size=UDim2.new(1,-28,0,1); line.Position=UDim2.fromOffset(14,59)
-line.BackgroundColor3=Color3.fromRGB(75,75,90); line.BorderSizePixel=0; line.Parent=panel
-local power=Instance.new("TextButton")
-power.Size=UDim2.new(1,-32,0,55); power.Position=UDim2.fromOffset(16,74)
-power.TextSize=19; power.Font=Enum.Font.GothamBold
-power.TextColor3=white; power.Parent=panel; corner(power,13)
-local statusLabel=text(panel,"เริ่มต้นระบบ...",16,white,true)
-statusLabel.Size=UDim2.new(1,-34,0,66); statusLabel.Position=UDim2.fromOffset(17,143)
-local detail=text(panel,"รอการตรวจสอบไข่",13,Color3.fromRGB(179,188,211),false)
-detail.Size=UDim2.new(1,-34,0,53); detail.Position=UDim2.fromOffset(17,215)
-local function setStatus(s) if alive() and ui.Parent then statusLabel.Text=s end end
-local function setDetail(s) if alive() and ui.Parent then detail.Text=s end end
+local function frame(parent,pos,size,color,r,border)
+    local x=Instance.new("Frame"); x.Position=pos; x.Size=size
+    x.BorderSizePixel=0; x.BackgroundColor3=color; x.Parent=parent
+    if r then round(x,r) end
+    if border then stroke(x,border,1.5) end
+    return x
+end
+local function txt(parent,s,pos,size,fontsize,color,bold)
+    local x=Instance.new("TextLabel"); x.BackgroundTransparency=1
+    x.Position=pos; x.Size=size; x.Text=s; x.TextColor3=color
+    x.Font=bold and Enum.Font.GothamBold or Enum.Font.Gotham
+    x.TextSize=fontsize; x.TextWrapped=true; x.TextXAlignment=Enum.TextXAlignment.Left
+    x.Parent=parent; return x
+end
+local function btn(parent,s,pos,size,bg,fg,font)
+    local x=Instance.new("TextButton"); x.Text=s; x.Position=pos; x.Size=size
+    x.BorderSizePixel=0; x.BackgroundColor3=bg; x.TextColor3=fg
+    x.Font=Enum.Font.GothamBold; x.TextSize=font or 18; x.Parent=parent
+    round(x,10); return x
+end
+local eggButton=btn(ui,"🥚",UDim2.new(0,12,.43,0),UDim2.fromOffset(62,62),C.dark,C.gold,34)
+stroke(eggButton,C.gold,3)
+local glow=frame(ui,UDim2.new(0,18,.43,6),UDim2.fromOffset(50,50),C.gold,25)
+glow.BackgroundTransparency=.88; glow.ZIndex=0; eggButton.ZIndex=2
+local panel=frame(ui,UDim2.fromScale(.5,.5),UDim2.fromOffset(680,440),C.dark,18,C.gold)
+panel.AnchorPoint=Vector2.new(.5,.5); panel.Visible=true; panel.ClipsDescendants=true
+stroke(panel,C.blue,1.3)
+local scale=Instance.new("UIScale"); scale.Parent=panel
+local function resize()
+    local camera=workspace.CurrentCamera
+    local viewport=camera and camera.ViewportSize or Vector2.new(800,600)
+    scale.Scale=math.min(1,math.max(.46,math.min((viewport.X-24)/680,(viewport.Y-24)/440)))
+end
+resize()
+if workspace.CurrentCamera then workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(resize) end
+local border=frame(panel,UDim2.fromOffset(5,5),UDim2.new(1,-10,1,-10),C.panel,15,C.gold)
+border.BackgroundTransparency=.25
+local header=frame(panel,UDim2.fromOffset(9,9),UDim2.new(1,-18,0,67),Color3.fromRGB(21,28,45),12,C.gold)
+gradient(header,Color3.fromRGB(55,30,18),Color3.fromRGB(6,30,56))
+local heading=txt(header,"✦  EGG MONITOR",UDim2.fromOffset(23,8),UDim2.fromOffset(480,38),31,C.gold,true)
+stroke(heading,Color3.fromRGB(75,39,12),.5)
+txt(header,"R I D E   A   P E T     •     TELEGRAM CONTROL",UDim2.fromOffset(28,45),UDim2.fromOffset(460,16),10,C.pale,true)
+local close=btn(header,"✕",UDim2.new(1,-56,0,10),UDim2.fromOffset(43,43),C.red,C.pale,27)
+stroke(close,C.gold,2)
+local power=btn(panel,"●  ระบบเปิด ON",UDim2.fromOffset(22,90),UDim2.fromOffset(397,61),Color3.fromRGB(8,115,79),C.pale,24)
+stroke(power,Color3.fromRGB(82,255,164),2)
+gradient(power,Color3.fromRGB(8,91,76),Color3.fromRGB(13,149,100))
+local tg=frame(panel,UDim2.fromOffset(430,90),UDim2.fromOffset(228,61),Color3.fromRGB(13,31,54),12,C.blue)
+txt(tg,"✈  TELEGRAM",UDim2.fromOffset(13,7),UDim2.fromOffset(210,24),18,C.blue,true)
+local tgState=txt(tg,"กำลังเชื่อมต่อ...",UDim2.fromOffset(15,34),UDim2.fromOffset(200,18),13,C.pale)
+txt(panel,"🥚 ไข่ที่ตรวจจับ",UDim2.fromOffset(24,161),UDim2.fromOffset(390,27),18,C.gold,true)
+txt(panel,"⚙ ระบบกิจกรรม",UDim2.fromOffset(432,161),UDim2.fromOffset(215,27),18,C.gold,true)
+local eggNames={{"Volcanic Egg","132679696143806","🌋"},{"Solaris Egg","131016816558781","☀"},{"Cherub Egg","78949206711037","👼"}}
+local eggCards={}
+for i,item in ipairs(eggNames) do
+    local x=frame(panel,UDim2.fromOffset(23+(i-1)*132,194),UDim2.fromOffset(124,108),C.panel,10,i==1 and C.red or (i==2 and C.gold or C.blue))
+    local im=Instance.new("ImageLabel")
+    im.BackgroundTransparency=1; im.Size=UDim2.fromOffset(72,72); im.Position=UDim2.fromOffset(26,4)
+    im.Image="rbxthumb://type=Asset&id="..item[2].."&w=150&h=150"
+    im.ScaleType=Enum.ScaleType.Fit; im.Parent=x
+    local nm=txt(x,item[1],UDim2.fromOffset(5,79),UDim2.fromOffset(115,23),12,C.pale,true)
+    nm.TextXAlignment=Enum.TextXAlignment.Center
+    eggCards[item[1]]=x
+end
+local switchesUI={}
+for i,name in ipairs(SWITCH_NAMES) do
+    local y=193+(i-1)*28
+    local row=frame(panel,UDim2.fromOffset(430,y),UDim2.fromOffset(228,26),Color3.fromRGB(14,30,48),6)
+    txt(row,name,UDim2.fromOffset(7,1),UDim2.fromOffset(184,24),11,C.pale)
+    local dot=frame(row,UDim2.fromOffset(204,6),UDim2.fromOffset(14,14),C.gold,7)
+    switchesUI[name]=dot
+end
+local infoBox=frame(panel,UDim2.fromOffset(22,313),UDim2.fromOffset(395,105),Color3.fromRGB(8,18,32),10,C.gold)
+txt(infoBox,"▣  สถานะการทำงาน",UDim2.fromOffset(12,7),UDim2.fromOffset(365,25),16,C.gold,true)
+local statusLabel=txt(infoBox,"กำลังเริ่มระบบ...",UDim2.fromOffset(13,35),UDim2.fromOffset(365,28),16,C.pale,true)
+local detail=txt(infoBox,"รอตรวจสอบไข่",UDim2.fromOffset(13,66),UDim2.fromOffset(365,32),13,C.dim)
+local helpBox=frame(panel,UDim2.fromOffset(429,345),UDim2.fromOffset(229,73),Color3.fromRGB(9,28,45),10,C.blue)
+txt(helpBox,"✦  MONITOR ACTIVE",UDim2.fromOffset(10,9),UDim2.fromOffset(210,20),14,C.gold,true)
+txt(helpBox,"รอ Map Eggs 10 วินาที\nส่งรูป + KG ไป Telegram",UDim2.fromOffset(10,30),UDim2.fromOffset(210,39),12,C.pale)
 local enabled=true
+local busy=false
+local function setStatus(s)
+    if alive() and ui.Parent then statusLabel.Text=s end
+end
+local function setDetail(s)
+    if alive() and ui.Parent then detail.Text=s end
+end
 local function paintPower()
-    power.Text=enabled and "● ระบบเปิด  ON" or "● ระบบปิด  OFF"
-    power.BackgroundColor3=enabled and Color3.fromRGB(21,143,99) or Color3.fromRGB(166,49,66)
+    power.Text=enabled and "●  ระบบเปิด ON" or "○  ระบบปิด OFF"
+    power.BackgroundColor3=enabled and Color3.fromRGB(8,126,81) or C.red
+    local edge=power:FindFirstChildOfClass("UIStroke")
+    if edge then edge.Color=enabled and Color3.fromRGB(82,255,164) or C.gold end
 end
 paintPower()
 eggButton.Activated:Connect(function() panel.Visible=not panel.Visible end)
 close.Activated:Connect(function() panel.Visible=false end)
+local sendPowerNotice=function() end
 power.Activated:Connect(function()
+    if not alive() then return end
+    if busy then setDetail("⏳ กำลังเก็บไข่ กรุณารอจนเสร็จ"); return end
     enabled=not enabled; paintPower()
-    setStatus(enabled and "🟢 เปิดตรวจไข่แล้ว" or "🔴 หยุดตรวจไข่ใหม่")
+    setStatus(enabled and "🟢 เปิดตรวจไข่แล้ว" or "🔴 หยุดตรวจไข่แล้ว")
+    setDetail(enabled and "กำลังเฝ้าดูไข่ใหม่" or "ปิดการแจ้งไข่ใหม่และรับคำสั่งเก็บไข่")
+    task.spawn(function() sendPowerNotice(enabled) end)
 end)
-
 setStatus("⏳ กำลังตรวจข้อมูลเกม...")
 local serverData = RS:FindFirstChild("ServerData") or RS:WaitForChild("ServerData", 12)
 if not serverData then
@@ -136,6 +190,12 @@ local function api(method,body)
 end
 local function send(message)
     return api("sendMessage",{chat_id=CHAT,text=message})
+end
+sendPowerNotice=function(on)
+    local msg=on and "🟢 Egg Monitor: เปิดระบบ ON\n🥚 เริ่มตรวจหาไข่และรับคำสั่งเก็บไข่แล้ว"
+        or "🔴 Egg Monitor: ปิดระบบ OFF\n⏸ หยุดแจ้งไข่ใหม่และไม่รับคำสั่งเก็บไข่"
+    local result,err=send(msg)
+    if not result then setDetail("⚠️ แจ้ง Telegram ไม่สำเร็จ: "..tostring(err):sub(1,80)) end
 end
 local function photoURL(id)
     local ok,res=pcall(function()
@@ -250,7 +310,7 @@ local function getAvailable()
     end
     return byName
 end
-local seenEggs={}; local busy=false
+local seenEggs={} -- busy declared with the UI
 local function announce(e)
     local name=eggName(e)
     local info=EGGS[name]
@@ -379,7 +439,7 @@ local function collectCycle(id)
 end
 
 local bot,err=api("getMe",{})
-if not bot then setStatus("❌ Telegram: "..tostring(err)); panel.Visible=true; return end
+if not bot then setStatus("❌ Telegram: "..tostring(err)); tgState.Text="● เชื่อมต่อไม่สำเร็จ"; panel.Visible=true; return end
 local offset=0
 local initial,initErr=api("getUpdates",{timeout=0,limit=100,allowed_updates={"callback_query"}})
 if not initial then
@@ -389,6 +449,7 @@ for _,u in ipairs(initial.result or {}) do
     offset=math.max(offset,u.update_id+1)
 end
 setStatus("🟢 Egg Monitor พร้อมทำงาน")
+tgState.Text="● เชื่อมต่อแล้ว"
 setDetail("ตรวจ Volcanic / Solaris / Cherub | Telegram เชื่อมต่อแล้ว")
 send("🟢 Ride A Pet Egg Monitor เริ่มทำงาน")
 
