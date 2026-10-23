@@ -9,7 +9,7 @@ local TweenService = game:GetService("TweenService")
 local P = Players.LocalPlayer
 local PG = P:WaitForChild("PlayerGui")
 local ROOTS = {PG, game:GetService("CoreGui")}
-local Active = RS:WaitForChild("ServerData"):WaitForChild("ActiveEggs")
+local Active -- initialize after the UI appears
 local HTTP = (syn and syn.request) or (http and http.request) or http_request or request
 local ENV = getgenv()
 ENV.RideEggRun = (ENV.RideEggRun or 0) + 1
@@ -58,14 +58,14 @@ local dark=Color3.fromRGB(14,18,30)
 local white=Color3.fromRGB(242,245,255)
 local eggButton=Instance.new("TextButton")
 eggButton.Name="EggMenuButton"; eggButton.Size=UDim2.fromOffset(58,58)
-eggButton.Position=UDim2.new(1,-76,.40,0)
+eggButton.Position=UDim2.new(0,16,.36,0)
 eggButton.BackgroundColor3=dark; eggButton.Text="🥚"; eggButton.TextSize=29
  eggButton.TextColor3=white; eggButton.Parent=ui
 corner(eggButton,18); stroke(eggButton,gold,2)
 local panel=Instance.new("Frame")
 panel.Name="ControlPanel"; panel.AnchorPoint=Vector2.new(.5,.5)
 panel.Position=UDim2.fromScale(.5,.5); panel.Size=UDim2.fromOffset(320,292)
-panel.BackgroundColor3=dark; panel.Visible=false; panel.Parent=ui
+panel.BackgroundColor3=dark; panel.Visible=true; panel.Parent=ui
 corner(panel,18); stroke(panel,gold,2)
 local gradient=Instance.new("UIGradient")
 gradient.Color=ColorSequence.new(Color3.fromRGB(27,31,53),dark)
@@ -104,6 +104,19 @@ power.Activated:Connect(function()
     setStatus(enabled and "🟢 เปิดตรวจไข่แล้ว" or "🔴 หยุดตรวจไข่ใหม่")
 end)
 
+setStatus("⏳ กำลังตรวจข้อมูลเกม...")
+local serverData = RS:FindFirstChild("ServerData") or RS:WaitForChild("ServerData", 12)
+if not serverData then
+    setStatus("❌ ไม่พบ ServerData ภายใน 12 วินาที")
+    setDetail("ตรวจสอบว่าเข้าเกม Ride A Pet ถูกเซิร์ฟเวอร์")
+    return
+end
+Active = serverData:FindFirstChild("ActiveEggs") or serverData:WaitForChild("ActiveEggs", 12)
+if not Active then
+    setStatus("❌ ไม่พบ ActiveEggs ภายใน 12 วินาที")
+    setDetail("ระบบ GUI เปิดแล้ว แต่ข้อมูลไข่ในเกมยังไม่พร้อม")
+    return
+end
 if not HTTP then setStatus("❌ Delta ไม่รองรับ HTTP request"); return end
 if TOKEN=="" or TOKEN=="PUT_NEW_TELEGRAM_BOT_TOKEN_HERE" then
     setStatus("⚠️ กรุณาใส่ Bot Token ใหม่"); panel.Visible=true; return
