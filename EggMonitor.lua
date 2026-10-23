@@ -37,6 +37,9 @@ local function api(method,data)
  if not ok or not res then return nil end
  local yes,obj=pcall(function() return HS:JSONDecode(res.Body or "{}") end)
  if yes and obj and obj.ok then return obj end
+ if method=="editMessageCaption" or method=="editMessageText" then
+  warn("[EGG TIMER] Telegram edit failed: "..tostring(yes and obj and obj.description or res.Body))
+ end
  return nil
 end
 local function send(s) return api("sendMessage",{chat_id=CHAT,text=s}) end
@@ -179,7 +182,9 @@ button.Activated:Connect(function()
 end)
 
 -- Each active egg has its own lifecycle; do not mistake a reset for collection.
-local tracked={}
+-- Preserve message IDs when rerunning this version in the same Roblox session.
+env.RideEggTracked = env.RideEggTracked or {}
+local tracked=env.RideEggTracked
 local pending={}
 local busy=false
 local lastPhase,lastSeconds=nil,nil
@@ -187,7 +192,7 @@ local cycle=0
 local warned={DAY=false,NIGHT=false}
 local pendingReset={}
 local function elapsedText(record)
- local elapsed=math.max(0,os.time()-(record.spawnedAt or os.time()))
+ local elapsed=math.max(0,math.floor((DateTime.now().UnixTimestampMillis-(record.spawnedMs or ((record.spawnedAt or os.time())*1000)))/1000))
  local days=math.floor(elapsed/86400)
  local hours=math.floor(elapsed%86400/3600)
  local minutes=math.floor(elapsed%3600/60)
@@ -206,6 +211,9 @@ local function editEggMessage(record,status)
  if not record.messageId then return false end
  status=status or record.finalStatus
  local payload={chat_id=CHAT,message_id=record.messageId}
+ if not status and record.state=="active" then
+  payload.reply_markup={inline_keyboard={{{text="🥚 เก็บไข่",callback_data="C"..record.id}}}}
+ end
  if record.isPhoto then
   payload.caption=captionFor(record,status)
   return api("editMessageCaption",payload) ~= nil
@@ -428,8 +436,8 @@ task.spawn(function()
     if EGGS[name] then
      local id=e.Name
      present[id]=true
-     if not tracked[id] then
-      tracked[id]={id=id,name=name,state="active",cycle=cycle,spawnedAt=os.time(),lastEditMinute=0}
+     if not tracked[id] or tracked[id].state~="active" then
+      tracked[id]={id=id,name=name,state="active",cycle=cycle,spawnedAt=os.time(),spawnedMs=DateTime.now().UnixTimestampMillis,lastEditMinute=-1}
       task.spawn(announce,e,tracked[id])
      end
     end
@@ -460,7 +468,7 @@ task.spawn(function()
   for _,record in pairs(tracked) do
    if not alive() then break end
    if record.messageId then
-    local minute=math.floor(math.max(0,os.time()-(record.spawnedAt or os.time()))/60)
+    local minute=math.floor(math.max(0,(DateTime.now().UnixTimestampMillis-(record.spawnedMs or ((record.spawnedAt or os.time())*1000)))/60000))
     if minute ~= record.lastEditMinute then
      if editEggMessage(record) then
       record.lastEditMinute=minute
