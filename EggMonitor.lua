@@ -1,91 +1,224 @@
--- Ride A Pet Egg Monitor | Chilli / Telegram / Auto backup
--- Set a NEW bot token privately. Never publish a token to public GitHub.
+-- Ride A Pet | Egg monitor + Telegram + Day/Night
+-- Fill in a NEW Telegram bot token. Do not share it publicly.
 local TOKEN = "8455689997:AAHwzIdo53Eo4v1IdaONYYkUhR8yGylUaCI"
 local CHAT = "1813392489"
-local Players=game:GetService('Players')
-local RS=game:GetService('ReplicatedStorage')
-local HS=game:GetService('HttpService')
-local UIS=game:GetService('UserInputService')
-local PG=Players.LocalPlayer:WaitForChild('PlayerGui')
-local Active=RS:WaitForChild('ServerData'):WaitForChild('ActiveEggs')
-local roots={PG,game:GetService('CoreGui')}
+
+local Players=game:GetService("Players")
+local RS=game:GetService("ReplicatedStorage")
+local HS=game:GetService("HttpService")
+local UIS=game:GetService("UserInputService")
+local P=Players.LocalPlayer
+local PG=P:WaitForChild("PlayerGui")
+local Active=RS:WaitForChild("ServerData"):WaitForChild("ActiveEggs")
+local roots={PG,game:GetService("CoreGui")}
 local req=(syn and syn.request) or (http and http.request) or http_request or request
 local env=(getgenv and getgenv()) or _G
 env.RideEggRun=(env.RideEggRun or 0)+1
-local RUN=env.RideEggRun
-local function alive() return env.RideEggRun==RUN end
+local run=env.RideEggRun
 env.EggMonitorEnabled=true
-env.RideEggAuto=env.RideEggAuto or false
-local EGGS={['Volcanic Egg']={icon='🌋',asset='132679696143806'},['Solaris Egg']={icon='☀️',asset='131016816558781'},['Cherub Egg']={icon='👼',asset='78949206711037'}}
-local SWITCHES={'Auto Collect Candy','Auto Search Pumpkins','Auto Trick Or Treat','Auto Halloween Ritual','Collect Rare Eggs First'}
-local DAY_ID='94969857695475'
-local NIGHT_ID='106891725078200'
-local function eggName(e) return e:GetAttribute('Egg') end
-local function desc(r) return (EGGS[r.name] and EGGS[r.name].icon or '🥚')..' '..r.name end
+local function alive() return env.RideEggRun==run end
 
--- Telegram is isolated in one bounded, paced queue. No HTTP on the scan loop.
-local jobs,head={},1
-local lastHTTP=0
-local blockedUntil=0
-local offset=0
-local function enqueue(method,data,callback,priority)
- if not req or TOKEN=='PUT_NEW_BOT_TOKEN_HERE' or CHAT=='PUT_CHAT_ID_HERE' then return false end
- if #jobs-head>90 and not priority then return false end
- local job={method=method,data=data,callback=callback,tries=0}
- if priority then table.insert(jobs,head,job) else table.insert(jobs,job) end
- return true
+local EGGS={
+ ["Volcanic Egg"]={icon="🌋",asset="132679696143806"},
+ ["Solaris Egg"]={icon="☀️",asset="131016816558781"},
+ ["Cherub Egg"]={icon="👼",asset="78949206711037"}
+}
+local SWITCHES={"Auto Collect Candy","Auto Search Pumpkins","Auto Trick Or Treat","Auto Halloween Ritual","Collect Rare Eggs First"}
+local MAX_COLLECT=2
+local COLLECT_TIMEOUT=300
+local REOPEN_DELAY=10
+local DAY_ID="94969857695475"
+local NIGHT_ID="106891725078200"
+
+-- HTTP is serialized in a separate worker; scan loops never wait for Telegram.
+local httpJobs={}
+local lastHttp=0
+local function api(method,data)
+ if not req or TOKEN=="PUT_NEW_BOT_TOKEN_HERE" then return nil end
+ local job={method=method,data=data,done=false,result=nil}
+ table.insert(httpJobs,job)
+ local untilAt=os.clock()+35
+ while alive() and not job.done and os.clock()<untilAt do task.wait(.1) end
+ return job.result
 end
-local function send(msg) return enqueue('sendMessage',{chat_id=CHAT,text=msg}) end
-local function decode(body)
- local ok,obj=pcall(function() return HS:JSONDecode(body or '{}') end)
- return ok and obj or nil
+local function queueSend(text)
+ task.spawn(function() api("sendMessage",{chat_id=CHAT,text=text}) end)
 end
 task.spawn(function()
  while alive() do
-  local job=jobs[head]
-  if not job then
-   if head>1 then jobs={};head=1 end
-   task.wait(.25)
-  elseif os.clock()<blockedUntil then
-   task.wait(math.min(2,blockedUntil-os.clock()))
-  else
-   local gap=2.2-(os.clock()-lastHTTP)
+  local job=table.remove(httpJobs,1)
+  if job then
+   local gap=2.2-(os.clock()-lastHttp)
    if gap>0 then task.wait(gap) end
-   if not alive() then break end
-   lastHTTP=os.clock()
+   lastHttp=os.clock()
    local ok,res=pcall(function()
-    return req({Url='https://api.telegram.org/bot'..TOKEN..'/'..job.method,Method='POST',Headers={['Content-Type']='application/json'},Body=HS:JSONEncode(job.data),Timeout=12})
+    return req({Url="https://api.telegram.org/bot"..TOKEN.."/"..job.method,Method="POST",Headers={["Content-Type"]="application/json"},Body=HS:JSONEncode(job.data),Timeout=12})
    end)
-   local obj=ok and res and decode(res.Body) or nil
-   local status=tonumber(ok and res and (res.StatusCode or res.Status)) or 0
-   if status==429 or (obj and obj.error_code==429) then
-    blockedUntil=os.clock()+math.max(3,tonumber(obj and obj.parameters and obj.parameters.retry_after) or 30)+2
-   else
-    head=head+1
-    if job.callback then task.spawn(job.callback,obj and obj.ok and obj or nil) end
-    if not (obj and obj.ok) and job.method~='getUpdates' then
-     warn('EggMonitor Telegram '..job.method..' failed: '..tostring(obj and obj.description or status))
+   if ok and res then
+    local yes,obj=pcall(function() return HS:JSONDecode(res.Body or "{}") end)
+    if yes and obj and obj.ok then job.result=obj end
+    if yes and obj and obj.error_code==429 then
+     local delay=math.clamp(tonumber(obj.parameters and obj.parameters.retry_after) or 5,2,45)
+     task.wait(delay)
+    end
+   end
+   job.done=true
+  else task.wait(.12) end
+ end
+end)
+local function send(s) queueSend(s) end
+local function thumbnail(id)
+ if not req then return nil end
+ local ok,res=pcall(function() return req({Url="https://thumbnails.roblox.com/v1/assets?assetIds="..id.."&size=420x420&format=Png&isCircular=false",Method="GET"}) end)
+ if not ok or not res then return nil end
+ local yes,data=pcall(function() return HS:JSONDecode(res.Body or "{}") end)
+ local item=yes and data.data and data.data[1]
+ return item and item.state=="Completed" and item.imageUrl or nil
+end
+local function press(b)
+ if not b or not b:IsA("GuiButton") then return false end
+ local called=false
+ if getconnections then
+  for _,signal in ipairs({b.Activated,b.MouseButton1Click,b.MouseButton1Down}) do
+   local ok,connections=pcall(getconnections,signal)
+   if ok and connections then
+    for _,c in ipairs(connections) do
+     if c.Function then
+      local success=pcall(c.Function)
+      if success then called=true;break end
+     end
+    end
+   end
+   if called then break end
+  end
+ end
+ return called
+end
+local function switchButton(name)
+ for _,root in ipairs(roots) do
+  for _,v in ipairs(root:GetDescendants()) do
+   if (v:IsA("TextLabel") or v:IsA("TextButton")) and v.Text==name then
+    local row=v.Parent
+    for _=1,3 do
+     if not row then break end
+     local sw=row:FindFirstChild("Switch",true)
+     local b=sw and sw:FindFirstChild("Button",true)
+     if b and b:IsA("GuiButton") then return b,sw end
+     row=row.Parent
     end
    end
   end
  end
-end)
+end
+-- Preserve the original five-switch routine, but restore only what was toggled.
+local function toggle5()
+ local changed={}
+ for _,name in ipairs(SWITCHES) do
+  if not alive() then break end
+  local b=switchButton(name)
+  if b and press(b) then table.insert(changed,name) end
+  task.wait(.25)
+ end
+ return #changed,changed
+end
+local function restore5(changed)
+ local n=0
+ for i=#changed,1,-1 do
+  local b=switchButton(changed[i])
+  if b and press(b) then n=n+1 end
+  task.wait(.25)
+ end
+ return n
+end
+local function cards()
+ local found,seen={},{}
+ for _,root in ipairs(roots) do
+  for _,v in ipairs(root:GetDescendants()) do
+   if v:IsA("TextLabel") and EGGS[v.Text] then
+    local parent=v.Parent
+    for _=1,5 do
+     if not parent then break end
+     local b=parent:FindFirstChild("Open")
+     if b and b:IsA("GuiButton") then
+      if not seen[b] then
+       seen[b]=true
+       table.insert(found,{name=v.Text,button=b,label=v})
+      end
+      break
+     end
+     parent=parent.Parent
+    end
+   end
+  end
+ end
+ return found
+end
+local function weightOf(name)
+ -- Map Eggs can contain multiple copies of the same name; never guess.
+ local matches={}
+ for _,root in ipairs(roots) do
+  for _,v in ipairs(root:GetDescendants()) do
+   if v:IsA("TextLabel") and v.Text==name then
+    local row=v.Parent
+    for _=1,3 do
+     if not row then break end
+     local weight=row:FindFirstChild("EggWeight",true)
+     if weight and weight:IsA("TextLabel") and weight.Text:lower():find("kg",1,true) then
+      matches[weight.Text]=true
+      break
+     end
+     for _,child in ipairs(row:GetDescendants()) do
+      if child:IsA("TextLabel") and child.Text:match("^%s*[%d,.]+%s*[KMBkmb]?%s*KG%s*$") then
+       matches[child.Text]=true
+      end
+     end
+     row=row.Parent
+    end
+   end
+  end
+ end
+ local value,count=nil,0
+ for w in pairs(matches) do value=w;count=count+1 end
+ if count==1 then return value end
+ if count>1 then return "รอตรวจสอบ (มีไข่ชื่อซ้ำ)" end
+ return "รอตรวจสอบน้ำหนักจาก Map Eggs"
+end
+local function readTime()
+ local main=PG:FindFirstChild("Main")
+ local dn=main and main:FindFirstChild("DayNightRotation")
+ local t=dn and dn:FindFirstChild("TimerLabel")
+ local img=dn and dn:FindFirstChild("TimeImage")
+ if not t or not img then return nil,nil end
+ local str=t.Text or ""
+ local m=tonumber(str:match("(%d+)%s*m")) or 0
+ local s=tonumber(str:match("(%d+)%s*s")) or 0
+ if not str:match("%d+%s*[ms]") then return nil,nil end
+ local id=(img.Image or ""):match("(%d+)$")
+ local phase=id==DAY_ID and "DAY" or (id==NIGHT_ID and "NIGHT" or nil)
+ return phase,m*60+s
+end
 
--- Small draggable on/off egg button, unchanged basic workflow.
-local old=PG:FindFirstChild('EggMonitorMini')
-if old then old:Destroy() end
-local gui=Instance.new('ScreenGui')
-gui.Name='EggMonitorMini';gui.ResetOnSpawn=false;gui.DisplayOrder=999;gui.Parent=PG
-local button=Instance.new('TextButton')
-button.Size=UDim2.fromOffset(68,68);button.Position=UDim2.new(.08,0,.3,0)
-button.BackgroundColor3=Color3.fromRGB(30,38,54);button.Text='🥚';button.TextSize=36;button.Parent=gui
-Instance.new('UICorner',button).CornerRadius=UDim.new(1,0)
-local stroke=Instance.new('UIStroke',button);stroke.Thickness=3
-local dot=Instance.new('Frame',button);dot.Size=UDim2.fromOffset(13,13);dot.Position=UDim2.new(1,-15,1,-15)
-Instance.new('UICorner',dot).CornerRadius=UDim.new(1,0)
+-- Small draggable egg ON/OFF button
+for _,name in ipairs({"EggMonitorMini","DayNightLiveTest","DayNightTestV12"}) do
+ local old=PG:FindFirstChild(name)
+ if old then old:Destroy() end
+end
+local gui=Instance.new("ScreenGui")
+gui.Name="EggMonitorMini";gui.ResetOnSpawn=false;gui.DisplayOrder=999;gui.Parent=PG
+local button=Instance.new("TextButton")
+button.Size=UDim2.fromOffset(68,68)
+button.Position=UDim2.new(.08,0,.3,0)
+button.BackgroundColor3=Color3.fromRGB(30,38,54)
+button.Text="🥚";button.TextSize=36;button.Parent=gui
+Instance.new("UICorner",button).CornerRadius=UDim.new(1,0)
+local stroke=Instance.new("UIStroke",button)
+stroke.Thickness=3
+local dot=Instance.new("Frame")
+dot.Size=UDim2.fromOffset(13,13);dot.Position=UDim2.new(1,-15,1,-15);dot.Parent=button
+Instance.new("UICorner",dot).CornerRadius=UDim.new(1,0)
 local function render()
- local c=env.EggMonitorEnabled and Color3.fromRGB(50,215,110) or Color3.fromRGB(240,65,65)
- stroke.Color=c;dot.BackgroundColor3=c
+ local color=env.EggMonitorEnabled and Color3.fromRGB(50,215,110) or Color3.fromRGB(240,65,65)
+ stroke.Color=color;dot.BackgroundColor3=color
 end
 render()
 local dragging,dragStart,startPos,moved=false,nil,nil,false
@@ -98,7 +231,7 @@ button.InputEnded:Connect(function(input)
  if input.UserInputType==Enum.UserInputType.Touch or input.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end
 end)
 local dragConnection=UIS.InputChanged:Connect(function(input)
- if dragging and dragStart and (input.UserInputType==Enum.UserInputType.Touch or input.UserInputType==Enum.UserInputType.MouseMovement) then
+ if dragging and (input.UserInputType==Enum.UserInputType.Touch or input.UserInputType==Enum.UserInputType.MouseMovement) and dragStart then
   local delta=input.Position-dragStart
   if delta.Magnitude>8 then moved=true end
   button.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+delta.X,startPos.Y.Scale,startPos.Y.Offset+delta.Y)
@@ -108,402 +241,252 @@ button.Activated:Connect(function()
  if moved then moved=false;return end
  env.EggMonitorEnabled=not env.EggMonitorEnabled
  render()
- send(env.EggMonitorEnabled and '🟢 เปิดระบบ Egg Monitor แล้ว' or '🔴 ปิดระบบ Egg Monitor แล้ว')
+ task.spawn(send,env.EggMonitorEnabled and "🟢 เปิดระบบ Egg Monitor แล้ว" or "🔴 ปิดระบบ Egg Monitor แล้ว")
 end)
 
-local function readTime()
- local main=PG:FindFirstChild('Main')
- local dn=main and main:FindFirstChild('DayNightRotation')
- local t=dn and dn:FindFirstChild('TimerLabel')
- local img=dn and dn:FindFirstChild('TimeImage')
- if not t or not img then return nil,nil end
- local str=t.Text or ''
- if not str:match('%d+%s*[ms]') then return nil,nil end
- local m=tonumber(str:match('(%d+)%s*m')) or 0
- local s=tonumber(str:match('(%d+)%s*s')) or 0
- local id=(img.Image or ''):match('(%d+)$')
- return id==DAY_ID and 'DAY' or (id==NIGHT_ID and 'NIGHT' or nil),m*60+s
-end
-
--- Cache Chilli GUI controls. Scan only once every 3s and yield while traversing.
-local cardCache,swCache,basketCache={},{},{}
-local function guiScan()
- local found,seen={},{}
- local switches={}
- local baskets={}
- for _,root in ipairs(roots) do
-  local nodes=root:GetDescendants()
-  for i,v in ipairs(nodes) do
-   if i%350==0 then task.wait() end
-   if v:IsA('TextLabel') and EGGS[v.Text] then
-    local p=v.Parent
-    for _=1,5 do
-     if not p then break end
-     local b=p:FindFirstChild('Open')
-     if b and b:IsA('GuiButton') then
-      if not seen[b] then seen[b]=true;table.insert(found,{name=v.Text,button=b,label=v}) end
-      break
-     end
-     p=p.Parent
-    end
-   end
-   if (v:IsA('TextLabel') or v:IsA('TextButton')) and v.Text:lower():find('in basket',1,true) then
-    local p=v.Parent
-    for _=1,4 do
-     if not p then break end
-     for _,q in ipairs(p:GetChildren()) do
-      if q:IsA('TextLabel') and EGGS[q.Text] then baskets[q.Text]=true end
-     end
-     p=p.Parent
-    end
-   end
-   if v.Name=='Switch' and v.Parent and (v.Parent.Name=='Auto Collect Eggs' or table.find(SWITCHES,v.Parent.Name)) then
-    local b=v:FindFirstChild('Button',true)
-    if b and b:IsA('GuiButton') then switches[v.Parent.Name]=b end
-   end
-  end
- end
- cardCache,swCache,basketCache=found,switches,baskets
-end
-task.spawn(function()
- while alive() do
-  if env.EggMonitorEnabled then pcall(guiScan) end
-  task.wait(3)
- end
-end)
--- Read weight from the exact ActiveEggs record first.
--- Never guess using another egg with the same name.
--- Prefer the visible Map Eggs card over unrelated ActiveEggs numeric attributes.
--- An ActiveEggs Weight attribute may use a different unit/meaning.
-local function weightOfEgg(egg)
- if not egg or not egg.Parent then return 'กำลังอัปเดต' end
- local name=eggName(egg)
- local candidates={}
- local seen={}
- for _,root in ipairs(roots) do
-  local nodes=root:GetDescendants()
-  for i,v in ipairs(nodes) do
-   if i%450==0 then task.wait() end
-   if v:IsA('TextLabel') and v.Text==name then
-    local p=v.Parent
-    for depth=1,4 do
-     if not p then break end
-     local weight
-     for _,x in ipairs(p:GetDescendants()) do
-      if x:IsA('TextLabel') then
-       local t=x.Text or ''
-       local value=t:match('([%d,%.]+%s*[KMBkmb]?%s*KG)')
-       if value then weight=value;break end
-      end
-     end
-     if weight then
-      -- The first name-containing card with a weight is sufficient; dedupe nested labels.
-      if not seen[v] then seen[v]=true;table.insert(candidates,weight) end
-      break
-     end
-     p=p.Parent
-    end
-   end
-  end
- end
- -- Never guess when same-name cards disagree about weight.
- if #candidates==1 then return candidates[1] end
- if #candidates>1 then
-  local first=candidates[1]
-  for i=2,#candidates do if candidates[i]~=first then return 'ตรวจพบไข่ชื่อซ้ำ (น้ำหนักไม่แน่นอน)' end end
-  return first
- end
- return 'กำลังอัปเดต (ไม่พบข้อมูลจาก Map Eggs)'
-end
--- Use the original user's Chilli switch path, with a click-signal fallback.
-local function press(b)
- if not b or not b.Parent or not b:IsA('GuiButton') or not getconnections then return false end
- for _,signal in ipairs({b.Activated,b.MouseButton1Click,b.MouseButton1Down}) do
-  local ok,done=pcall(function()
-   for _,c in ipairs(getconnections(signal)) do
-    if c.Function then c.Function();return true end
-   end
-   return false
-  end)
-  if ok and done then return true end
- end
- return false
-end
-local function switchButton(name)
- for _,root in ipairs(roots) do
-  local v=root:FindFirstChild(name,true)
-  if v then
-   local sw=v:FindFirstChild('Switch',true)
-   local b=sw and sw:FindFirstChild('Button',true)
-   if b and b:IsA('GuiButton') then return b,sw end
-  end
- end
- return nil,nil
-end
--- Green switch backgrounds are ON in the user's screenshot.
--- Do not blindly toggle an already-OFF switch, and never touch Auto Collect Eggs.
-local function switchState(sw)
- if not sw then return nil end
- -- The Switch container itself is often black. The GREEN background is
- -- on a child Frame / Button holder, not on the outer Switch.
- local green,dark=false,false
- local nodes={sw}
- for _,v in ipairs(sw:GetDescendants()) do table.insert(nodes,v) end
- for _,v in ipairs(nodes) do
-  if v:IsA('GuiObject') and v.Visible then
-   local c=v.BackgroundColor3
-   local r,g,b=c.R,c.G,c.B
-   if v.BackgroundTransparency<.9 then
-    if g>.35 and g>r*1.35 and g>b*1.3 then green=true end
-    if r<.25 and g<.25 and b<.25 then dark=true end
-   end
-  end
- end
- if green then return true end
- if dark then return false end
- return nil
-end
-local eventOriginal={}
-local function setEventsOff()
- local changed={}
- for _,name in ipairs(SWITCHES) do
-  if not alive() then break end
-  local button,sw=switchButton(name)
-  if not button then return false,changed,'ไม่พบสวิตช์ '..name end
-  local wasOn=switchState(sw)
-  if wasOn==false then
-   eventOriginal[name]=false
-  elseif wasOn==true then
-   eventOriginal[name]=true
-   if not press(button) then return false,changed,'กดปิดไม่ได้ '..name end
-   table.insert(changed,name)
-   task.wait(.35)
-   local _,after=switchButton(name)
-   if switchState(after)~=false then return false,changed,'สวิตช์ยังไม่ปิด '..name end
-  else
-   return false,changed,'อ่านสถานะสวิตช์ไม่ได้ '..name
-  end
- end
- return true,changed
-end
-local function restoreEvents(changed)
- for i=#changed,1,-1 do
-  if not alive() then break end
-  local name=changed[i]
-  local button,sw=switchButton(name)
-  if button and switchState(sw)==false then
-   press(button)
-   task.wait(.35)
-  end
- end
-end
--- Chilli state is NOT inferred from a green button; this is game/UI dependent.
--- An explicit In basket label is stronger evidence, but may be ambiguous for duplicate names.
-local function inBasket(name)
- return basketCache[name]==true
-end
-local thumbCache={}
-local function thumbnail(id)
- if thumbCache[id] then return thumbCache[id] end
- if not req then return nil end
- local ok,res=pcall(function()
-  return req({Url='https://thumbnails.roblox.com/v1/assets?assetIds='..id..'&size=420x420&format=Png&isCircular=false',Method='GET',Timeout=8})
- end)
- if not ok or not res then return nil end
- local good,data=pcall(function() return HS:JSONDecode(res.Body or '{}') end)
- local item=good and data and data.data and data.data[1]
- if item and item.state=='Completed' and item.imageUrl then
-  thumbCache[id]=item.imageUrl
-  return item.imageUrl
- end
- return nil
-end
-local chilliNoticeAt={}
-local tracked={}
+-- Each active egg has its own lifecycle; do not mistake a reset for collection.
+-- Preserve message IDs when rerunning this version in the same Roblox session.
+env.RideEggTracked = env.RideEggTracked or {}
+local tracked=env.RideEggTracked
 local pending={}
+local autoEnabled=false
 local busy=false
-local autoWindow=false
-local attempted={}
+local activeSource={}
+local lastAutoAttempt={}
+local dawnCycle=0
+local dawnStarted=false
 local lastPhase,lastSeconds=nil,nil
-local warned={DAY=false,NIGHT=false}
 local cycle=0
-local function caption(r,final)
- return desc(r):gsub('^','🥚 พบ ')..'\n⚖️ น้ำหนัก: '..(r.weight or 'กำลังอัปเดต')..(final and ('\n'..final) or '\n🥚 กดปุ่มเพื่อเก็บไข่')
+local warned={DAY=false,NIGHT=false}
+local pendingReset={}
+local function captionFor(record,status)
+ local item=EGGS[record.name]
+ return item.icon.." พบ "..record.name.."\n⚖️ น้ำหนัก: "..(record.weight or "กำลังอัปเดต").."\n"..(status or "🥚 กดปุ่มเพื่อเก็บไข่")
 end
-local function edit(r)
- if not r.messageId or not r.final then return end
- local data={chat_id=CHAT,message_id=r.messageId,reply_markup={inline_keyboard={}}}
- if r.isPhoto then data.caption=caption(r,r.final) else data.text=caption(r,r.final) end
- enqueue(r.isPhoto and 'editMessageCaption' or 'editMessageText',data)
-end
-local function finish(r,kind)
- if not r or r.final then return end
- if kind=='chilli' then
-  local now=os.clock()
-  if chilliNoticeAt[r.name] and now-chilliNoticeAt[r.name]<12 then
-   -- Duplicate ActiveEggs IDs can refer to the same Chilli collection.
-   r.state='chilli';r.final='✅ Chilli เก็บ '..r.name..' สำเร็จ';edit(r);return
-  end
-  chilliNoticeAt[r.name]=now
+local function editEggMessage(record,status)
+ if not record.messageId then return false end
+ status=status or record.finalStatus
+ local payload={chat_id=CHAT,message_id=record.messageId}
+ if not status and record.state=="active" then
+  payload.reply_markup={inline_keyboard={{{text="🥚 เก็บไข่",callback_data="C"..record.id}}}}
  end
- r.state=kind;r.final=true
- local msg
- if kind=='chilli' then msg='✅ Chilli เก็บ '..r.name..' สำเร็จ';r.final=msg
- elseif kind=='telegram' then msg='✅ กดเก็บ '..r.name..' สำเร็จ';r.final=msg
- elseif kind=='auto' then msg='✅ ระบบ AUTO เก็บ '..r.name..' สำเร็จ';r.final=msg
- elseif kind=='reset' then msg='❌ ไข่ถูกรีเซ็ต ไม่มีระบบไหนเก็บไปได้\n'..desc(r);r.final='❌ ไข่ถูกรีเซ็ต ไม่มีระบบไหนเก็บไปได้'
- else msg='⚠️ '..r.name..' หายจากข้อมูล ยังไม่ยืนยันว่าเก็บแล้ว';r.final='⚠️ ยังยืนยันการเก็บไม่ได้' end
- edit(r);send(msg)
-end
-local function announce(e,r)
- task.wait(2)
- if not alive() or not env.EggMonitorEnabled or not e.Parent or r.final then return end
- -- Give Chilli's UI a moment to populate EggWeight before sending.
- local weight='กำลังอัปเดต'
- for i=1,6 do
-  if not alive() or r.final then return end
-  weight=weightOfEgg(e)
-  if weight~='กำลังอัปเดต' and weight~='กำลังอัปเดต (ยังจับคู่ไข่ไม่ได้)' then break end
-  task.wait(1)
- end
- r.weight=weight
- local keyboard={inline_keyboard={{{text='🥚 เก็บไข่',callback_data='C'..r.id}}}}
- local function done(obj,photo)
-  if not alive() then return end
-  if obj and obj.result then
-   r.messageId=obj.result.message_id;r.isPhoto=photo
-   if r.final then edit(r) end
-  elseif photo then
-   enqueue('sendMessage',{chat_id=CHAT,text=caption(r),reply_markup=keyboard},function(other) done(other,false) end)
-  end
- end
- -- Thumbnail lookup runs only in this independent task, never in the scan loop.
- local url=thumbnail(EGGS[r.name].asset)
- if url then
-  enqueue('sendPhoto',{chat_id=CHAT,photo=url,caption=caption(r),reply_markup=keyboard},function(obj) done(obj,true) end)
+ if record.isPhoto then
+  payload.caption=captionFor(record,status)
+  return api("editMessageCaption",payload) ~= nil
  else
-  enqueue('sendMessage',{chat_id=CHAT,text=caption(r),reply_markup=keyboard},function(obj) done(obj,false) end)
+  payload.text=captionFor(record,status)
+  return api("editMessageText",payload) ~= nil
+ end
+end
+local function finalize(record,status)
+ record.finalStatus=status
+ if record.messageId then editEggMessage(record,status) end
+end
+
+local function eggName(e) return e:GetAttribute("Egg") end
+local function describe(r) return (EGGS[r.name] and EGGS[r.name].icon or "🥚").." "..r.name end
+local function announce(e,record)
+ task.wait(2)
+ if not alive() or not env.EggMonitorEnabled or not e.Parent or record.state~="active" then return end
+ local item=EGGS[record.name]
+ record.weight=weightOf(record.name)
+ local keyboard={inline_keyboard={{{text="🥚 เก็บไข่",callback_data="C"..record.id}}}}
+ local url=thumbnail(item.asset)
+ local res=url and api("sendPhoto",{chat_id=CHAT,photo=url,caption=captionFor(record),reply_markup=keyboard})
+ if res then
+  record.isPhoto=true
+ else
+  res=api("sendMessage",{chat_id=CHAT,text=captionFor(record),reply_markup=keyboard})
+  record.isPhoto=false
+ end
+ if res and res.result then
+  record.messageId=res.result.message_id
+  if record.finalStatus then editEggMessage(record,record.finalStatus) end
+ end
+end
+local function confirmCollected(record,source)
+ if record.state~="active" then return end
+ local title=source=="auto" and "✅ ระบบ AUTO เก็บ " or "✅ กดเก็บ "
+ record.state=source or "telegram"
+ finalize(record,title..record.name.." สำเร็จ")
+ pending[record.id]=nil
+ send(title..record.name.." สำเร็จ")
+end
+local function markMissing(record,phase,seconds)
+ if record.state~="active" then return end
+ if pending[record.id] then
+  -- A disappearing ID is not sufficient proof of collection.
+  record.state="uncertain"
+  finalize(record,"⚠️ รอตรวจสอบผลการเก็บไข่")
+  return
+ end
+ -- If near the night->day transition, defer classification until the new day.
+ if phase=="NIGHT" and seconds and seconds<=60 then
+  record.state="await-reset"
+  record.missingAt=os.clock()
+  pendingReset[record.id]=record
+  return
+ end
+ record.state="uncertain"
+ finalize(record,"⚠️ ไข่หายจาก ActiveEggs ยังยืนยันการเก็บไม่ได้")
+ send("⚠️ ยังยืนยันไม่ได้ว่าไข่ถูกเก็บหรือรีเซ็ต\n"..describe(record))
+end
+local function settleReset()
+ for id,record in pairs(pendingReset) do
+  if record.state=="await-reset" then
+   record.state="reset"
+   finalize(record,"⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว")
+   send("⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว\n"..describe(record))
+  end
+  pendingReset[id]=nil
+ end
+end
+local function detectTime()
+ local phase,seconds=readTime()
+ if not phase then return end
+ if lastPhase and phase~=lastPhase then
+  if lastPhase=="NIGHT" and phase=="DAY" then
+   cycle=cycle+1
+    dawnCycle=dawnCycle+1
+    dawnStarted=false
+   -- At sunrise, eggs that were active in the preceding cycle may have reset.
+   for id,record in pairs(tracked) do
+    if record.state=="active" and record.cycle<cycle and not Active:FindFirstChild(id) then
+     record.state="reset"
+     send("⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว\n"..describe(record))
+    end
+   end
+   settleReset()
+  elseif lastPhase=="DAY" and phase=="NIGHT" then
+   -- A missing egg at dusk is not automatically considered a reset.
+  end
+  warned={DAY=false,NIGHT=false}
+ elseif lastSeconds and seconds>lastSeconds+60 then
+  warned[phase]=false
+ end
+ lastPhase,lastSeconds=phase,seconds
+ if env.EggMonitorEnabled and seconds<=60 and not warned[phase] then
+  local hasEgg=false
+  for id,record in pairs(tracked) do
+   if record.state=="active" and Active:FindFirstChild(id) then hasEgg=true;break end
+  end
+  if hasEgg then
+   warned[phase]=true
+   if phase=="DAY" then send("🌙 อีก 1 นาที จะเข้าสู่กลางคืน")
+   else send("☀️ อีก 1 นาที จะเข้าสู่ตอนเช้า") end
+  end
+ end
+ -- If the countdown wrapped while image remained unchanged, avoid indefinite pending.
+ if phase=="NIGHT" and seconds>60 then
+  for id,record in pairs(pendingReset) do
+   if os.clock()-(record.missingAt or 0)>35 then
+    record.state="other";pendingReset[id]=nil
+    finalize(record,"🥚 ไข่ถูกเก็บแล้ว (ไม่ได้เก็บผ่าน Telegram)")
+    send("🥚 ไข่ถูกเก็บแล้ว (ไม่ได้เก็บผ่าน Telegram)\n"..describe(record))
+   end
+  end
  end
 end
 
--- Source attribution: only record success when we have a matching positive collection signal.
--- A missing ActiveEggs ID by itself never confirms collection.
-local function confirmed(r,source)
- if r.final then return end
- if inBasket(r.name) then finish(r,source) end
-end
-local function collect(requestId,source)
- if busy or not alive() or not env.EggMonitorEnabled then return false end
+local function collectCycle(requestId,source)
+ source=source or "telegram"
+ if busy or not env.EggMonitorEnabled then return end
  local chosen=Active:FindFirstChild(requestId)
- if not chosen or not EGGS[eggName(chosen)] then return false end
- local r=tracked[requestId]
- if not r or r.final or inBasket(r.name) then
-  if r and not r.final then finish(r,'chilli') end
-  return false
- end
+ if not chosen or not EGGS[eggName(chosen)] then return end
  busy=true
  local changed={}
- local ok,err=pcall(function()
-  -- Preserve original sequence: turn off 5 event switches, collect, turn on again.
-  -- Never toggle Chilli's separate Auto Collect Eggs switch.
-  local success,changedNow,why=setEventsOff()
-  changed=changedNow
-  if not success then error('ไม่สามารถปิด Event: '..tostring(why)) end
-  task.wait(1)
-  local selected={}
-  for _,c in ipairs(cardCache) do
-   if c.name==r.name and c.button.Parent then table.insert(selected,c) end
-  end
-  if #selected==0 then error('ไม่พบปุ่ม Open ของ '..r.name) end
-  -- Two eggs max per attempt, as in original; one source owns each pending ID.
-  local ids={}
-  for _,e in ipairs(Active:GetChildren()) do
-   if eggName(e)==r.name and tracked[e.Name] and not tracked[e.Name].final then table.insert(ids,e.Name) end
-  end
-  table.sort(ids,function(a,b) return a==requestId and b~=requestId end)
+ local function work()
+  local n
+  n,changed=toggle5()
+  if n~=5 then error("ปิด Event ไม่ครบ 5/5 (กดได้ "..n..")") end
+  task.wait(.5)
   local count=0
-  for _,c in ipairs(selected) do
-   if count>=2 or not alive() then break end
-   local id=ids[count+1]
-   if id and not pending[id] and press(c.button) then
-    pending[id]={source=source,at=os.clock()}
-    attempted[id]=true
+  local watching={}
+  for _,card in ipairs(cards()) do
+   if count>=MAX_COLLECT then break end
+   local selected=nil
+   for _,e in ipairs(Active:GetChildren()) do
+    if eggName(e)==card.name and not pending[e.Name] and (e.Name==requestId or source=="auto") then
+     selected=e.Name;break
+    end
+   end
+   if selected and press(card.button) then
+    pending[selected]=true
+    activeSource[selected]=source
+    watching[selected]=true
     count=count+1
    end
-   task.wait(.25)
   end
-  if count==0 then error('กดปุ่ม Open ไม่สำเร็จ') end
-  local start=os.clock()
-  while alive() and os.clock()-start<12 do
-   for id,p in pairs(pending) do
-    if p.source==source and tracked[id] then confirmed(tracked[id],source) end
+  local started=os.clock()
+  while alive() and next(watching) and os.clock()-started<math.min(COLLECT_TIMEOUT,55) do
+   for id in pairs(watching) do
+    if not Active:FindFirstChild(id) then
+     watching[id]=nil
+     local record=tracked[id]
+     -- Disappearance alone is NOT proof of collection.
+     if record and record.state=="active" then
+      record.state="uncertain"
+      finalize(record,"⚠️ กดเก็บแล้ว แต่ยังยืนยันผลไม่ได้")
+      send("⚠️ กดเก็บแล้ว รอตรวจสอบผล: "..record.name)
+     end
+    end
    end
-   task.wait(.7)
+   task.wait(1)
   end
-  for id,p in pairs(pending) do if p.source==source then pending[id]=nil end end
- end)
- -- Always restore the five switches after a complete initial toggle, even on error.
- -- If the first toggle was partial, never blindly toggle again.
- if alive() then restoreEvents(changed) end
- if not ok then
-  warn('EggMonitor collect: '..tostring(err))
-  send('⚠️ เก็บไข่ไม่สำเร็จ: '..tostring(err))
+  for id in pairs(watching) do pending[id]=nil end
  end
+ local ok,err=pcall(work)
+ local restored=restore5(changed)
+ if not ok then send("⚠️ เก็บไข่ไม่สำเร็จ: "..tostring(err)) end
+ if #changed>0 and restored~=#changed then send("⚠️ เปิด Event กลับไม่ครบ โปรดตรวจสอบสวิตช์") end
+ for id in pairs(pending) do pending[id]=nil;activeSource[id]=nil end
  busy=false
- return ok
+end
+if not req or TOKEN=="PUT_NEW_BOT_TOKEN_HERE" then
+ warn("Egg Monitor: fill in Telegram TOKEN and ensure executor supports HTTP")
 end
 
--- Telegram commands and callback buttons: poll sparingly, never block scan loop.
-local polling=false
-local function processUpdates(obj)
- polling=false
- if not alive() or not obj then return end
- for _,u in ipairs(obj.result or {}) do
-  offset=math.max(offset,u.update_id+1)
-  local m=u.message
-  if m and m.chat and tostring(m.chat.id)==tostring(CHAT) then
-   local cmd=tostring(m.text or ''):lower():match('^%s*(.-)%s*$')
-   if cmd=='auto' then
-    env.RideEggAuto=true
-    send('🤖 เปิด AUTO สำรองแล้ว: รอ 1 นาทีก่อนเช้า และเก็บเฉพาะไข่ที่ยังเหลือ')
-   elseif cmd=='stop' then
-    env.RideEggAuto=false
-    send('🛑 ปิด AUTO สำรองแล้ว ระบบหลักและปุ่ม Telegram ยังทำงาน')
-   end
-  end
-  local cb=u.callback_query
-  if cb then
-   enqueue('answerCallbackQuery',{callback_query_id=cb.id,text='รับคำสั่งแล้ว'},nil,true)
-   if cb.message and cb.message.chat and tostring(cb.message.chat.id)==tostring(CHAT) and type(cb.data)=='string' and cb.data:sub(1,1)=='C' then
-    local id=cb.data:sub(2)
-    task.spawn(collect,id,'telegram')
-   end
-  end
- end
-end
 task.spawn(function()
- -- Ignore old updates from before this run.
- local initialized=false
+ local offset=0
+ local init=api("getUpdates",{timeout=0,limit=100,allowed_updates={"callback_query","message"}})
+ if init then for _,u in ipairs(init.result or {}) do offset=math.max(offset,u.update_id+1) end end
  while alive() do
-  if not polling then
-   polling=true
-   local data={timeout=0,limit=50,allowed_updates={'message','callback_query'}}
-   if initialized then data.offset=offset end
-   local queued=enqueue('getUpdates',data,function(obj)
-    if not initialized and obj then
-     for _,u in ipairs(obj.result or {}) do offset=math.max(offset,u.update_id+1) end
-     initialized=true;polling=false
-    else processUpdates(obj) end
-   end)
-   if not queued then polling=false end
+  local data=api("getUpdates",{offset=offset,timeout=0,limit=50,allowed_updates={"callback_query","message"}})
+  if data then
+   for _,u in ipairs(data.result or {}) do
+    offset=math.max(offset,u.update_id+1)
+    local cb=u.callback_query
+    if cb and type(cb.data)=="string" and cb.data:sub(1,1)=="C" then
+     local source=cb.message and cb.message.chat and tostring(cb.message.chat.id)
+     api("answerCallbackQuery",{callback_query_id=cb.id,text="รับคำสั่งแล้ว"})
+     if source==CHAT then task.spawn(collectCycle,cb.data:sub(2),"telegram") end
+    end
+   end
   end
   task.wait(7)
  end
 end)
 
--- One scan per second; never performs HTTP or deep GUI traversal.
 task.spawn(function()
- send('🟢 Ride A Pet Egg Monitor เริ่มทำงาน')
+ while alive() do
+  if autoEnabled and env.EggMonitorEnabled and not busy then
+   local phase,seconds=readTime()
+   if phase=="NIGHT" and seconds and seconds<=60 then
+    for _,e in ipairs(Active:GetChildren()) do
+     if EGGS[eggName(e)] and not pending[e.Name] and not lastAutoAttempt[e.Name] then
+      lastAutoAttempt[e.Name]=true
+      task.spawn(collectCycle,e.Name,"auto")
+      break
+     end
+    end
+   end
+  end
+  task.wait(2)
+ end
+end)
+
+task.spawn(function()
+ send("🟢 Ride A Pet Egg Monitor เริ่มทำงาน")
  while alive() do
   if env.EggMonitorEnabled then
    local phase,seconds=readTime()
@@ -511,72 +494,35 @@ task.spawn(function()
    for _,e in ipairs(Active:GetChildren()) do
     local name=eggName(e)
     if EGGS[name] then
-     local id=e.Name;present[id]=true
-     if not tracked[id] then
-      local r={id=id,name=name,state='active',cycle=cycle}
-      tracked[id]=r
-      task.spawn(announce,e,r)
+     local id=e.Name
+     present[id]=true
+     if not tracked[id] or tracked[id].state~="active" then
+      tracked[id]={id=id,name=name,state="active",cycle=cycle,spawnedAt=os.time(),spawnedMs=DateTime.now().UnixTimestampMillis,lastEditMinute=-1}
+      task.spawn(announce,e,tracked[id])
      end
     end
    end
-   if lastPhase and phase and phase~=lastPhase then
-    if lastPhase=='NIGHT' and phase=='DAY' then
-     cycle=cycle+1
-     for id,r in pairs(tracked) do
-      if not r.final and not present[id] then
-       if inBasket(r.name) then finish(r,pending[id] and pending[id].source or 'chilli')
-       else finish(r,'reset') end
-      end
-     end
-    end
-    warned={DAY=false,NIGHT=false};attempted={};autoWindow=false
-   elseif lastSeconds and seconds and seconds>lastSeconds+60 and phase then
-    warned[phase]=false
-   end
-   if phase then lastPhase=phase;lastSeconds=seconds end
-   if phase and seconds and seconds<=60 and not warned[phase] then
-    local hasEgg=false
-    for id,r in pairs(tracked) do if not r.final and present[id] then hasEgg=true;break end end
-    if hasEgg then
-     warned[phase]=true
-     send(phase=='NIGHT' and '☀️ อีก 1 นาที จะเข้าสู่ตอนเช้า' or '🌙 อีก 1 นาที จะเข้าสู่กลางคืน')
-    end
-   end
-   -- AUTO is the fallback. Wait until <=25s to give Chilli/Telegram first chance.
-   -- If Chilli is actively collecting, it may still race; game exposes no reliable busy signal here.
-   local window=(phase=='NIGHT' and seconds and seconds<=60)
-   if window and not autoWindow then attempted={} end
-   autoWindow=not not window
-   if window and seconds<=25 and seconds>9 and env.RideEggAuto and not busy then
-    for id,r in pairs(tracked) do
-     if not r.final and present[id] and not pending[id] and not attempted[id] then
-      attempted[id]=true
-      task.spawn(collect,id,'auto')
-      break
-     end
-    end
-   end
-   for id,r in pairs(tracked) do
-    if not r.final then
-     if present[id] then
-      if inBasket(r.name) then finish(r,pending[id] and pending[id].source or 'chilli') end
+   -- Detect time transition first; classify eggs missing at sunrise as reset.
+   local sunrise=(lastPhase=="NIGHT" and phase=="DAY")
+   detectTime()
+   for id,record in pairs(tracked) do
+    if record.state=="active" and not present[id] then
+     if sunrise and record.cycle<cycle and not pending[id] then
+      record.state="reset"
+      finalize(record,"⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว")
+      send("⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว\n"..describe(record))
      else
-      if not r.missingAt then r.missingAt=os.clock() end
-      if inBasket(r.name) then
-       finish(r,pending[id] and pending[id].source or 'chilli')
-      elseif phase=='NIGHT' and seconds and seconds<=60 then
-       -- Never classify as collected during dawn reset window.
-      elseif os.clock()-r.missingAt>15 then
-       -- Not enough evidence to call Chilli successful. Wait for sunrise if possible.
-       if phase=='DAY' and r.cycle<cycle then finish(r,'reset')
-       elseif not r.warned then r.warned=true;send('⚠️ '..r.name..' หายจากข้อมูล ยังยืนยันการเก็บไม่ได้') end
-      end
+      markMissing(record,phase,seconds)
      end
     end
    end
   end
   task.wait(1)
  end
+end)
+
+task.spawn(function()
+ while alive() do task.wait(1) end
  if dragConnection then dragConnection:Disconnect() end
  if gui.Parent then gui:Destroy() end
 end)
