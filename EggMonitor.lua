@@ -21,7 +21,6 @@ env.RideEggAuto = env.RideEggAuto or false
 local function alive() return env.RideEggRun == run end
 
 local EGGS = {
- ["Blackhole Egg"]={icon="🌌",asset="133246489138606"},
  ["Volcanic Egg"]={icon="🌋",asset="132679696143806"},
  ["Solaris Egg"]={icon="☀️",asset="131016816558781"},
  ["Cherub Egg"]={icon="👼",asset="78949206711037"}
@@ -51,19 +50,19 @@ local function round(obj,r)
 end
 local mini=Instance.new("TextButton")
 mini.Name="EggButton"
-mini.Size=UDim2.fromOffset(64,64)
+mini.Size=UDim2.fromOffset(115,40)
 mini.Position=UDim2.new(.06,0,.32,0)
-mini.BackgroundColor3=Color3.fromRGB(27,37,55)
-mini.Text="🥚"
-mini.TextSize=32
+mini.BackgroundColor3=Color3.fromRGB(31,100,76)
+mini.Text="เปิดหน้าต่าง"
+mini.TextSize=15
 mini.TextColor3=Color3.new(1,1,1)
 mini.Parent=gui
-round(mini,32)
+round(mini,10)
 local stroke=Instance.new("UIStroke",mini)
-stroke.Thickness=3
+stroke.Thickness=1
 local dot=Instance.new("Frame",mini)
-dot.Size=UDim2.fromOffset(13,13)
-dot.Position=UDim2.new(1,-15,1,-15)
+dot.Size=UDim2.fromOffset(10,10)
+dot.Position=UDim2.new(1,-12,1,-12)
 round(dot,10)
 
 local frame=Instance.new("Frame")
@@ -78,7 +77,7 @@ local header=Instance.new("TextLabel",frame)
 header.Size=UDim2.new(1,-92,0,38)
 header.Position=UDim2.fromOffset(12,3)
 header.BackgroundTransparency=1
-header.Text="🥚 EGG MONITOR"
+header.Text="EGG MONITOR"
 header.Font=Enum.Font.GothamBold
 header.TextSize=17
 header.TextXAlignment=Enum.TextXAlignment.Left
@@ -123,7 +122,7 @@ local function setCollapsed(v)
  collapse.Text=v and "+" or "−"
 end
 collapse.Activated:Connect(function() setCollapsed(not collapsed) end)
-close.Activated:Connect(function() frame.Visible=false end)
+close.Activated:Connect(function() frame.Visible=false; mini.Text="เปิดหน้าต่าง" end)
 
 local function makeDraggable(obj,handle)
  local dragging=false
@@ -167,11 +166,12 @@ end)
 local stats={sent=0,found=0,active=0,last="กำลังเริ่มระบบ",telegram="ยังไม่ตรวจสอบ",blockedUntil=0}
 local function status(s) stats.last=tostring(s) end
 local function render()
+ mini.Text=frame.Visible and "ซ่อนหน้าต่าง" or "เปิดหน้าต่าง"
  local on=env.EggMonitorEnabled
  local c=on and Color3.fromRGB(65,215,115) or Color3.fromRGB(240,75,75)
  stroke.Color=c;dot.BackgroundColor3=c
- power.Text=on and "🟢 ปิดระบบตรวจไข่" or "🔴 เปิดระบบตรวจไข่"
- power.BackgroundColor3=on and Color3.fromRGB(36,113,75) or Color3.fromRGB(135,58,58)
+ power.Text=on and "ปิดระบบตรวจไข่" or "เปิดระบบตรวจไข่"
+ power.BackgroundColor3=on and Color3.fromRGB(135,58,58) or Color3.fromRGB(36,113,75)
  local waitFor=math.max(0,math.ceil(stats.blockedUntil-os.time()))
  local tg=waitFor>0 and ("HTTP 429: รอ "..math.ceil(waitFor/60).." นาที") or stats.telegram
  info.Text="ระบบ: "..(on and "เปิดอยู่" or "ปิดอยู่").."\n"..
@@ -182,9 +182,19 @@ local function render()
   "Telegram: "..tg.."\n"..
   "ล่าสุด: "..stats.last
 end
+local StarterGui=game:GetService("StarterGui")
+local function notifyPower(enabled)
+ local msg=enabled and "เปิดระบบตรวจไข่แล้ว" or "ปิดระบบตรวจไข่แล้ว"
+ pcall(function()
+  StarterGui:SetCore("SendNotification",{
+   Title="EGG MONITOR",Text=msg,Duration=5
+  })
+ end)
+end
 power.Activated:Connect(function()
  env.EggMonitorEnabled=not env.EggMonitorEnabled
  status(env.EggMonitorEnabled and "เปิดตรวจไข่แล้ว" or "หยุดตรวจไข่ชั่วคราว")
+ notifyPower(env.EggMonitorEnabled)
  render()
 end)
 mini.Activated:Connect(function()
