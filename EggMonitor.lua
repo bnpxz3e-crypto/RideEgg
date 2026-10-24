@@ -186,6 +186,26 @@ local function weightOf(name)
    end
   end
  end
+ -- Fallback: search visible egg cards directly when the cache has not loaded.
+ for _,root in ipairs(roots) do
+  local seen=0
+  for _,v in ipairs(root:GetDescendants()) do
+   seen=seen+1
+   if seen%450==0 then task.wait() end
+   if v:IsA('TextLabel') and v.Text==name then
+    local p=v.Parent
+    for _=1,4 do
+     if not p then break end
+     local w=p:FindFirstChild('EggWeight',true)
+     if w and w:IsA('TextLabel') and w.Text:lower():find('kg',1,true) then return w.Text end
+     for _,x in ipairs(p:GetDescendants()) do
+      if x:IsA('TextLabel') and x.Text:lower():find('kg',1,true) then return x.Text end
+     end
+     p=p.Parent
+    end
+   end
+  end
+ end
  return 'กำลังอัปเดต'
 end
 local function press(b)
@@ -204,10 +224,23 @@ end
 local function inBasket(name)
  return basketCache[name]==true
 end
+local thumbCache={}
 local function thumbnail(id)
- -- No network thumbnail lookups in game: Telegram accepts Roblox thumbnail URL directly.
- return 'https://www.roblox.com/asset-thumbnail/image?assetId='..id..'&width=420&height=420&format=png'
+ if thumbCache[id] then return thumbCache[id] end
+ if not req then return nil end
+ local ok,res=pcall(function()
+  return req({Url='https://thumbnails.roblox.com/v1/assets?assetIds='..id..'&size=420x420&format=Png&isCircular=false',Method='GET',Timeout=8})
+ end)
+ if not ok or not res then return nil end
+ local good,data=pcall(function() return HS:JSONDecode(res.Body or '{}') end)
+ local item=good and data and data.data and data.data[1]
+ if item and item.state=='Completed' and item.imageUrl then
+  thumbCache[id]=item.imageUrl
+  return item.imageUrl
+ end
+ return nil
 end
+local chilliNoticeAt={}
 local tracked={}
 local pending={}
 local busy=false
@@ -227,6 +260,14 @@ local function edit(r)
 end
 local function finish(r,kind)
  if not r or r.final then return end
+ if kind=='chilli' then
+  local now=os.clock()
+  if chilliNoticeAt[r.name] and now-chilliNoticeAt[r.name]<12 then
+   -- Duplicate ActiveEggs IDs can refer to the same Chilli collection.
+   r.state='chilli';r.final='✅ Chilli เก็บ '..r.name..' สำเร็จ';edit(r);return
+  end
+  chilliNoticeAt[r.name]=now
+ end
  r.state=kind;r.final=true
  local msg
  if kind=='chilli' then msg='✅ Chilli เก็บ '..r.name..' สำเร็จ';r.final=msg
@@ -239,7 +280,15 @@ end
 local function announce(e,r)
  task.wait(2)
  if not alive() or not env.EggMonitorEnabled or not e.Parent or r.final then return end
- r.weight=weightOf(r.name)
+ -- Give Chilli's UI a moment to populate EggWeight before sending.
+ local weight='กำลังอัปเดต'
+ for i=1,6 do
+  if not alive() or r.final then return end
+  weight=weightOf(r.name)
+  if weight~='กำลังอัปเดต' then break end
+  task.wait(1)
+ end
+ r.weight=weight
  local keyboard={inline_keyboard={{{text='🥚 เก็บไข่',callback_data='C'..r.id}}}}
  local function done(obj,photo)
   if not alive() then return end
@@ -250,7 +299,13 @@ local function announce(e,r)
    enqueue('sendMessage',{chat_id=CHAT,text=caption(r),reply_markup=keyboard},function(other) done(other,false) end)
   end
  end
- enqueue('sendPhoto',{chat_id=CHAT,photo=thumbnail(EGGS[r.name].asset),caption=caption(r),reply_markup=keyboard},function(obj) done(obj,true) end)
+ -- Thumbnail lookup runs only in this independent task, never in the scan loop.
+ local url=thumbnail(EGGS[r.name].asset)
+ if url then
+  enqueue('sendPhoto',{chat_id=CHAT,photo=url,caption=caption(r),reply_markup=keyboard},function(obj) done(obj,true) end)
+ else
+  enqueue('sendMessage',{chat_id=CHAT,text=caption(r),reply_markup=keyboard},function(obj) done(obj,false) end)
+ end
 end
 
 -- Source attribution: only record success when we have a matching positive collection signal.
