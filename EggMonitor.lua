@@ -179,7 +179,19 @@ button.Activated:Connect(function()
  if moved then moved=false;return end
  env.EggMonitorEnabled=not env.EggMonitorEnabled
  render()
- task.spawn(send,env.EggMonitorEnabled and "🟢 เปิดระบบ Egg Monitor แล้ว" or "🔴 ปิดระบบ Egg Monitor แล้ว")
+ button.Text="⏳"
+
+ task.spawn(function()
+  local msg=env.EggMonitorEnabled and
+   "🟢 เปิดระบบ Egg Monitor แล้ว" or
+   "🔴 ปิดระบบ Egg Monitor แล้ว"
+
+  local result=send(msg)
+  button.Text=result and "🥚" or "❌"
+  if not result then
+   warn("EGG MONITOR: Telegram send failed")
+  end
+ end)
 end)
 
 -- Each active egg has its own lifecycle; do not mistake a reset for collection.
