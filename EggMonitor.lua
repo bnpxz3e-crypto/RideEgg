@@ -173,52 +173,47 @@ task.spawn(function()
 end)
 -- Read weight from the exact ActiveEggs record first.
 -- Never guess using another egg with the same name.
+-- Prefer the visible Map Eggs card over unrelated ActiveEggs numeric attributes.
+-- An ActiveEggs Weight attribute may use a different unit/meaning.
 local function weightOfEgg(egg)
  if not egg or not egg.Parent then return 'กำลังอัปเดต' end
- local id=tostring(egg.Name)
- local function fmt(v)
-  if type(v)=='number' and v>0 then return string.format('%.2f KG',v) end
-  if type(v)=='string' and v:lower():find('kg',1,true) then return v end
-  return nil
- end
- for _,key in ipairs({'Weight','EggWeight','weight','eggWeight','KG','Kg','Mass'}) do
-  local w=fmt(egg:GetAttribute(key))
-  if w then return w end
-  local child=egg:FindFirstChild(key)
-  if child and child:IsA('ValueBase') then
-   w=fmt(child.Value)
-   if w then return w end
-  end
- end
- -- Only accept a UI card if its own instance/attributes identify this exact egg.
- -- Chilli GUI often shows other eggs with the same name, so name alone is unsafe.
  local name=eggName(egg)
+ local candidates={}
+ local seen={}
  for _,root in ipairs(roots) do
   local nodes=root:GetDescendants()
   for i,v in ipairs(nodes) do
-   if i%500==0 then task.wait() end
+   if i%450==0 then task.wait() end
    if v:IsA('TextLabel') and v.Text==name then
     local p=v.Parent
-    for depth=1,3 do
+    for depth=1,4 do
      if not p then break end
-     local matched=false
-     for _,key in ipairs({'EggId','EggID','EggUUID','UUID','Id','ID'}) do
-      if tostring(p:GetAttribute(key) or '')==id then matched=true;break end
-     end
-     if p.Name==id then matched=true end
-     if matched then
-      local w=p:FindFirstChild('EggWeight',true)
-      if w and w:IsA('TextLabel') then
-       local result=fmt(w.Text)
-       if result then return result end
+     local weight
+     for _,x in ipairs(p:GetDescendants()) do
+      if x:IsA('TextLabel') then
+       local t=x.Text or ''
+       local value=t:match('([%d,%.]+%s*[KMBkmb]?%s*KG)')
+       if value then weight=value;break end
       end
+     end
+     if weight then
+      -- The first name-containing card with a weight is sufficient; dedupe nested labels.
+      if not seen[v] then seen[v]=true;table.insert(candidates,weight) end
+      break
      end
      p=p.Parent
     end
    end
   end
  end
- return 'กำลังอัปเดต (ยังจับคู่ไข่ไม่ได้)'
+ -- Never guess when same-name cards disagree about weight.
+ if #candidates==1 then return candidates[1] end
+ if #candidates>1 then
+  local first=candidates[1]
+  for i=2,#candidates do if candidates[i]~=first then return 'ตรวจพบไข่ชื่อซ้ำ (น้ำหนักไม่แน่นอน)' end end
+  return first
+ end
+ return 'กำลังอัปเดต (ไม่พบข้อมูลจาก Map Eggs)'
 end
 -- Use the original user's Chilli switch path, with a click-signal fallback.
 local function press(b)
@@ -249,12 +244,23 @@ end
 -- Do not blindly toggle an already-OFF switch, and never touch Auto Collect Eggs.
 local function switchState(sw)
  if not sw then return nil end
- local bg=sw:IsA('GuiObject') and sw or sw:FindFirstChildWhichIsA('Frame')
- if not bg then return nil end
- local c=bg.BackgroundColor3
- local r,g,b=c.R,c.G,c.B
- if g>r*1.22 and g>b*1.22 and g>.24 then return true end
- if r<.35 and g<.35 and b<.35 then return false end
+ -- The Switch container itself is often black. The GREEN background is
+ -- on a child Frame / Button holder, not on the outer Switch.
+ local green,dark=false,false
+ local nodes={sw}
+ for _,v in ipairs(sw:GetDescendants()) do table.insert(nodes,v) end
+ for _,v in ipairs(nodes) do
+  if v:IsA('GuiObject') and v.Visible then
+   local c=v.BackgroundColor3
+   local r,g,b=c.R,c.G,c.B
+   if v.BackgroundTransparency<.9 then
+    if g>.35 and g>r*1.35 and g>b*1.3 then green=true end
+    if r<.25 and g<.25 and b<.25 then dark=true end
+   end
+  end
+ end
+ if green then return true end
+ if dark then return false end
  return nil
 end
 local eventOriginal={}
@@ -439,7 +445,10 @@ local function collect(requestId,source)
  -- Always restore the five switches after a complete initial toggle, even on error.
  -- If the first toggle was partial, never blindly toggle again.
  if alive() then restoreEvents(changed) end
- if not ok then warn('EggMonitor collect: '..tostring(err)) end
+ if not ok then
+  warn('EggMonitor collect: '..tostring(err))
+  send('⚠️ เก็บไข่ไม่สำเร็จ: '..tostring(err))
+ end
  busy=false
  return ok
 end
