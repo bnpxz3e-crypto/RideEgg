@@ -43,6 +43,14 @@ local function api(method,data)
  end
  return nil
 end
+task.spawn(function()
+ local r=api("getMe",{})
+ if r then
+  warn("TELEGRAM OK")
+ else
+  warn("TELEGRAM FAILED")
+ end
+end)
 local function send(s) return api("sendMessage",{chat_id=CHAT,text=s}) end
 local function thumbnail(id)
  if not req then return nil end
