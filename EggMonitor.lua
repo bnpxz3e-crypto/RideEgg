@@ -171,42 +171,54 @@ task.spawn(function()
   task.wait(3)
  end
 end)
-local function weightOf(name)
- for _,c in ipairs(cardCache) do
-  if c.name==name and c.label.Parent then
-   local p=c.label.Parent
-   for _=1,4 do
-    if not p then break end
-    local w=p:FindFirstChild('EggWeight',true)
-    if w and w:IsA('TextLabel') and w.Text~='' then return w.Text end
-    for _,v in ipairs(p:GetDescendants()) do
-     if v:IsA('TextLabel') and v.Text:lower():find('kg',1,true) then return v.Text end
-    end
-    p=p.Parent
-   end
+-- Read weight from the exact ActiveEggs record first.
+-- Never guess using another egg with the same name.
+local function weightOfEgg(egg)
+ if not egg or not egg.Parent then return 'กำลังอัปเดต' end
+ local id=tostring(egg.Name)
+ local function fmt(v)
+  if type(v)=='number' and v>0 then return string.format('%.2f KG',v) end
+  if type(v)=='string' and v:lower():find('kg',1,true) then return v end
+  return nil
+ end
+ for _,key in ipairs({'Weight','EggWeight','weight','eggWeight','KG','Kg','Mass'}) do
+  local w=fmt(egg:GetAttribute(key))
+  if w then return w end
+  local child=egg:FindFirstChild(key)
+  if child and child:IsA('ValueBase') then
+   w=fmt(child.Value)
+   if w then return w end
   end
  end
- -- Fallback: search visible egg cards directly when the cache has not loaded.
+ -- Only accept a UI card if its own instance/attributes identify this exact egg.
+ -- Chilli GUI often shows other eggs with the same name, so name alone is unsafe.
+ local name=eggName(egg)
  for _,root in ipairs(roots) do
-  local seen=0
-  for _,v in ipairs(root:GetDescendants()) do
-   seen=seen+1
-   if seen%450==0 then task.wait() end
+  local nodes=root:GetDescendants()
+  for i,v in ipairs(nodes) do
+   if i%500==0 then task.wait() end
    if v:IsA('TextLabel') and v.Text==name then
     local p=v.Parent
-    for _=1,4 do
+    for depth=1,3 do
      if not p then break end
-     local w=p:FindFirstChild('EggWeight',true)
-     if w and w:IsA('TextLabel') and w.Text:lower():find('kg',1,true) then return w.Text end
-     for _,x in ipairs(p:GetDescendants()) do
-      if x:IsA('TextLabel') and x.Text:lower():find('kg',1,true) then return x.Text end
+     local matched=false
+     for _,key in ipairs({'EggId','EggID','EggUUID','UUID','Id','ID'}) do
+      if tostring(p:GetAttribute(key) or '')==id then matched=true;break end
+     end
+     if p.Name==id then matched=true end
+     if matched then
+      local w=p:FindFirstChild('EggWeight',true)
+      if w and w:IsA('TextLabel') then
+       local result=fmt(w.Text)
+       if result then return result end
+      end
      end
      p=p.Parent
     end
    end
   end
  end
- return 'กำลังอัปเดต'
+ return 'กำลังอัปเดต (ยังจับคู่ไข่ไม่ได้)'
 end
 -- Use the original user's Chilli switch path, with a click-signal fallback.
 local function press(b)
@@ -344,8 +356,8 @@ local function announce(e,r)
  local weight='กำลังอัปเดต'
  for i=1,6 do
   if not alive() or r.final then return end
-  weight=weightOf(r.name)
-  if weight~='กำลังอัปเดต' then break end
+  weight=weightOfEgg(e)
+  if weight~='กำลังอัปเดต' and weight~='กำลังอัปเดต (ยังจับคู่ไข่ไม่ได้)' then break end
   task.wait(1)
  end
  r.weight=weight
