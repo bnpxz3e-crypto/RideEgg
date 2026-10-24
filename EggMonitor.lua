@@ -219,6 +219,27 @@ local function press(b)
  end)
  return ok and hit or false
 end
+-- RESTORED FROM USER ORIGINAL: the five Halloween Event toggles.
+-- This deliberately does not touch Chilli Hub's "Auto Collect Eggs" switch.
+local function switchButton(name)
+ for _,root in ipairs(roots) do
+  local v=root:FindFirstChild(name,true)
+  if v then
+   local sw=v:FindFirstChild('Switch',true)
+   local b=sw and sw:FindFirstChild('Button',true)
+   if b and b:IsA('GuiButton') then return b end
+  end
+ end
+end
+local function toggle5()
+ local n=0
+ for _,name in ipairs(SWITCHES) do
+  if not alive() then break end
+  if press(switchButton(name)) then n=n+1 end
+  task.wait(.3)
+ end
+ return n
+end
 -- Chilli state is NOT inferred from a green button; this is game/UI dependent.
 -- An explicit In basket label is stronger evidence, but may be ambiguous for duplicate names.
 local function inBasket(name)
@@ -324,9 +345,14 @@ local function collect(requestId,source)
   return false
  end
  busy=true
+ local toggledAll=false
  local ok,err=pcall(function()
-  -- Never toggle Chilli's Auto Collect Eggs; doing so may fight the primary collector.
-  -- Only press the same Open control used by the original Telegram workflow.
+  -- Preserve original sequence: turn off 5 event switches, collect, turn on again.
+  -- Never toggle Chilli's separate Auto Collect Eggs switch.
+  local off=toggle5()
+  if off~=5 then error('ปิด Halloween Event ได้ '..off..'/5; ตรวจสถานะด้วยตนเองก่อนเก็บ') end
+  toggledAll=true
+  task.wait(1)
   local selected={}
   for _,c in ipairs(cardCache) do
    if c.name==r.name and c.button.Parent then table.insert(selected,c) end
@@ -359,6 +385,12 @@ local function collect(requestId,source)
   end
   for id,p in pairs(pending) do if p.source==source then pending[id]=nil end end
  end)
+ -- Always restore the five switches after a complete initial toggle, even on error.
+ -- If the first toggle was partial, never blindly toggle again.
+ if toggledAll and alive() then
+  local on=toggle5()
+  if on~=5 then warn('EggMonitor: เปิด Event กลับได้ '..on..'/5; ตรวจสวิตช์ด้วยตนเอง') end
+ end
  if not ok then warn('EggMonitor collect: '..tostring(err)) end
  busy=false
  return ok
