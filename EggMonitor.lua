@@ -175,7 +175,7 @@ local function render()
  info.Text="ระบบ: "..(on and "เปิดอยู่" or "ปิดอยู่").."\n"..
   "ไข่เป้าหมายในเซิร์ฟ: "..stats.active.." ใบ\n"..
   "แจ้งไข่แล้ว: "..stats.found.." ใบ\n"..
-  "ส่ง Telegram สำเร็จ: "..stats.sent.." ครั้ง\n"..
+  "ส่งข้อความ/รูปสำเร็จ: "..stats.sent.." ครั้ง\n"..
   "Telegram: "..tg.."\n"..
   "ล่าสุด: "..stats.last
 end
@@ -247,7 +247,10 @@ task.spawn(function()
     local code=ok and res and (res.StatusCode or res.Status) or nil
     if obj and obj.ok then
      job.result=obj;job.done=true;queueHead=queueHead+1
-     stats.sent=stats.sent+1;stats.telegram="พร้อมใช้งาน"
+     if job.method=="sendMessage" or job.method=="sendPhoto" then
+      stats.sent=stats.sent+1
+     end
+     stats.telegram="พร้อมใช้งาน"
     elseif tonumber(code)==429 or (obj and obj.error_code==429) then
      local retry=tonumber(obj and obj.parameters and obj.parameters.retry_after) or 60
      stats.blockedUntil=os.time()+math.max(1,retry)+2
