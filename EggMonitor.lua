@@ -18,6 +18,7 @@ env.EggMonitorEnabled=true
 local function alive() return env.RideEggRun==run end
 
 local EGGS={
+ ["Blackhole Egg"]={icon="🌌",asset="133246489138606"},
  ["Volcanic Egg"]={icon="🌋",asset="132679696143806"},
  ["Solaris Egg"]={icon="☀️",asset="131016816558781"},
  ["Cherub Egg"]={icon="👼",asset="78949206711037"}
