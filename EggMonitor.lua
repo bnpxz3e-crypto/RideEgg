@@ -436,6 +436,11 @@ local function confirmCollected(r)
  pending[r.id]=nil
  task.spawn(send,"✅ ไข่ "..r.name.." ถูกเก็บสำเร็จแล้ว")
 end
+local function notifyChilliCollected(r)
+ if r.chilliNoticeSent then return end
+ r.chilliNoticeSent=true
+ task.spawn(send,"✅ Chilli hub เก็บไข่ให้แล้ว\n"..((EGGS[r.name] and EGGS[r.name].icon) or "🥚").." "..r.name)
+end
 local function markMissing(r,phase,seconds)
  if r.state~="active" then return end
  if pending[r.id] then confirmCollected(r);return end
@@ -445,7 +450,8 @@ local function markMissing(r,phase,seconds)
  end
  -- Limitation: the client sees disappearance, not a definitive collection event.
  r.state="other"
- finalize(r,"✅ สำเร็จ")
+ finalize(r,"✅ Chilli hub เก็บไข่ให้แล้ว")
+ notifyChilliCollected(r)
 end
 local function settleReset()
  for id,r in pairs(pendingReset) do
@@ -483,7 +489,8 @@ local function detectTime()
   for id,r in pairs(pendingReset) do
    if os.clock()-(r.missingAt or 0)>35 then
     r.state="other";pendingReset[id]=nil
-    finalize(r,"✅ สำเร็จ")
+    finalize(r,"✅ Chilli hub เก็บไข่ให้แล้ว")
+    notifyChilliCollected(r)
    end
   end
  end
