@@ -19,6 +19,7 @@ env.EggMonitorEnabled = true
 local function alive() return env.RideEggRun == run end
 
 local EGGS = {
+ ["Blackhole Egg"]={icon="🌌",asset="133246489138606"},
  ["Volcanic Egg"]={icon="🌋",asset="132679696143806"},
  ["Solaris Egg"]={icon="☀️",asset="131016816558781"},
  ["Cherub Egg"]={icon="👼",asset="78949206711037"}
@@ -364,6 +365,12 @@ end
 -- Lifecycle: edit each Telegram egg message only once on its final state.
 env.RideEggTracked=env.RideEggTracked or {}
 local tracked=env.RideEggTracked
+-- Only track current session's live eggs; don't classify old run's records as missing.
+for id,r in pairs(tracked) do
+ if not Active:FindFirstChild(id) and (r.state=="active" or r.state=="missing") then
+  r.state="uncertain"
+ end
+end
 local pending={}
 local pendingReset={}
 local busy=false
@@ -436,26 +443,42 @@ local function confirmCollected(r)
  pending[r.id]=nil
  task.spawn(send,"✅ ไข่ "..r.name.." ถูกเก็บสำเร็จแล้ว")
 end
-local function notifyChilliCollected(r)
- if r.chilliNoticeSent then return end
- r.chilliNoticeSent=true
- task.spawn(send,"✅ Chilli hub เก็บไข่ให้แล้ว\n"..((EGGS[r.name] and EGGS[r.name].icon) or "🥚").." "..r.name)
+-- Egg disappearing from ActiveEggs does NOT prove Chilli Hub collected it.
+-- Only a confirmed Chilli Hub collection event could justify a success notice.
+local MISSING_GRACE=15
+local function notifyUncertain(r,stillVisible)
+ if r.uncertainNoticeSent then return end
+ r.uncertainNoticeSent=true
+ local icon=(EGGS[r.name] and EGGS[r.name].icon) or "🥚"
+ local msg=stillVisible and
+  "⚠️ ยังพบไข่บน Map Eggs แต่ Egg ID เปลี่ยน/หายจาก ActiveEggs\n" or
+  "⚠️ ไข่หายจาก ActiveEggs แต่ยังยืนยันว่าเก็บสำเร็จไม่ได้\n"
+ task.spawn(send,msg..icon.." "..r.name.."\nกรุณาตรวจสอบในเกม อย่าเพิ่งถือว่าเก็บแล้ว")
+end
+local function markUncertain(r)
+ if r.state~="active" and r.state~="missing" then return end
+ local visible=false
+ for _,c in ipairs(cards()) do
+  if c.name==r.name then visible=true;break end
+ end
+ r.state="uncertain"
+ finalize(r,visible and "⚠️ ยังพบไข่ใน Map Eggs กรุณาตรวจสอบ" or "⚠️ ยังไม่ยืนยันการเก็บไข่")
+ notifyUncertain(r,visible)
+ fireStatus(r.name.." → ยังไม่ยืนยันว่าเก็บแล้ว")
 end
 local function markMissing(r,phase,seconds)
  if r.state~="active" then return end
- if pending[r.id] then confirmCollected(r);return end
- if phase=="NIGHT" and seconds and seconds<=60 then
-  r.state="await-reset";r.missingAt=os.clock();pendingReset[r.id]=r
+ if pending[r.id] then
+  -- Keep the Telegram collection workflow separate.
   return
  end
- -- Limitation: the client sees disappearance, not a definitive collection event.
- r.state="other"
- finalize(r,"✅ Chilli hub เก็บไข่ให้แล้ว")
- notifyChilliCollected(r)
+ r.state="missing"
+ r.missingAt=os.clock()
+ fireStatus(r.name.." → ไข่หายจากข้อมูล รอตรวจสอบ")
 end
 local function settleReset()
  for id,r in pairs(pendingReset) do
-  if r.state=="await-reset" then
+  if r.state=="await-reset" or r.state=="missing" then
    r.state="reset"
    finalize(r,"❌ ไข่โดนรีเซ็ต")
   end
@@ -488,9 +511,8 @@ local function detectTime()
  if phase=="NIGHT" and seconds>60 then
   for id,r in pairs(pendingReset) do
    if os.clock()-(r.missingAt or 0)>35 then
-    r.state="other";pendingReset[id]=nil
-    finalize(r,"✅ Chilli hub เก็บไข่ให้แล้ว")
-    notifyChilliCollected(r)
+    pendingReset[id]=nil
+    markUncertain(r)
    end
   end
  end
@@ -614,6 +636,10 @@ task.spawn(function()
       tracked[id]={id=id,name=name,state="active"}
      end
      local r=tracked[id]
+     if r.state=="missing" then
+      r.state="active";r.missingAt=nil
+      fireStatus(name.." → พบ Egg ID เดิมอีกครั้ง ไม่แจ้งเก็บสำเร็จ")
+     end
      if r.state=="active" and not r.messageId and not r.sending and os.clock()-(r.lastAttempt or 0)>=30 then
       r.lastAttempt=os.clock()
       task.spawn(announce,e,r)
@@ -624,12 +650,14 @@ task.spawn(function()
    local sunrise=lastPhase=="NIGHT" and phase=="DAY"
    detectTime()
    for id,r in pairs(tracked) do
-    if r.state=="active" and not present[id] then
+    if (r.state=="active" or r.state=="missing") and not present[id] then
      if sunrise and not pending[id] then
       r.state="reset"
       finalize(r,"❌ ไข่โดนรีเซ็ต")
-     else
+     elseif r.state=="active" then
       markMissing(r,phase,seconds)
+     elseif r.state=="missing" and os.clock()-(r.missingAt or os.clock())>=MISSING_GRACE then
+      markUncertain(r)
      end
     end
    end
