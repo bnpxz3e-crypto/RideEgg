@@ -208,37 +208,76 @@ local function weightOf(name)
  end
  return 'กำลังอัปเดต'
 end
+-- Use the original user's Chilli switch path, with a click-signal fallback.
 local function press(b)
  if not b or not b.Parent or not b:IsA('GuiButton') or not getconnections then return false end
- local ok,hit=pcall(function()
-  local n=0
-  for _,c in ipairs(getconnections(b.Activated)) do
-   if c.Function then c.Function();n=n+1 end
-  end
-  return n>0
- end)
- return ok and hit or false
+ for _,signal in ipairs({b.Activated,b.MouseButton1Click,b.MouseButton1Down}) do
+  local ok,done=pcall(function()
+   for _,c in ipairs(getconnections(signal)) do
+    if c.Function then c.Function();return true end
+   end
+   return false
+  end)
+  if ok and done then return true end
+ end
+ return false
 end
--- RESTORED FROM USER ORIGINAL: the five Halloween Event toggles.
--- This deliberately does not touch Chilli Hub's "Auto Collect Eggs" switch.
 local function switchButton(name)
  for _,root in ipairs(roots) do
   local v=root:FindFirstChild(name,true)
   if v then
    local sw=v:FindFirstChild('Switch',true)
    local b=sw and sw:FindFirstChild('Button',true)
-   if b and b:IsA('GuiButton') then return b end
+   if b and b:IsA('GuiButton') then return b,sw end
   end
  end
+ return nil,nil
 end
-local function toggle5()
- local n=0
+-- Green switch backgrounds are ON in the user's screenshot.
+-- Do not blindly toggle an already-OFF switch, and never touch Auto Collect Eggs.
+local function switchState(sw)
+ if not sw then return nil end
+ local bg=sw:IsA('GuiObject') and sw or sw:FindFirstChildWhichIsA('Frame')
+ if not bg then return nil end
+ local c=bg.BackgroundColor3
+ local r,g,b=c.R,c.G,c.B
+ if g>r*1.22 and g>b*1.22 and g>.24 then return true end
+ if r<.35 and g<.35 and b<.35 then return false end
+ return nil
+end
+local eventOriginal={}
+local function setEventsOff()
+ local changed={}
  for _,name in ipairs(SWITCHES) do
   if not alive() then break end
-  if press(switchButton(name)) then n=n+1 end
-  task.wait(.3)
+  local button,sw=switchButton(name)
+  if not button then return false,changed,'ไม่พบสวิตช์ '..name end
+  local wasOn=switchState(sw)
+  if wasOn==false then
+   eventOriginal[name]=false
+  elseif wasOn==true then
+   eventOriginal[name]=true
+   if not press(button) then return false,changed,'กดปิดไม่ได้ '..name end
+   table.insert(changed,name)
+   task.wait(.35)
+   local _,after=switchButton(name)
+   if switchState(after)~=false then return false,changed,'สวิตช์ยังไม่ปิด '..name end
+  else
+   return false,changed,'อ่านสถานะสวิตช์ไม่ได้ '..name
+  end
  end
- return n
+ return true,changed
+end
+local function restoreEvents(changed)
+ for i=#changed,1,-1 do
+  if not alive() then break end
+  local name=changed[i]
+  local button,sw=switchButton(name)
+  if button and switchState(sw)==false then
+   press(button)
+   task.wait(.35)
+  end
+ end
 end
 -- Chilli state is NOT inferred from a green button; this is game/UI dependent.
 -- An explicit In basket label is stronger evidence, but may be ambiguous for duplicate names.
@@ -345,13 +384,13 @@ local function collect(requestId,source)
   return false
  end
  busy=true
- local toggledAll=false
+ local changed={}
  local ok,err=pcall(function()
   -- Preserve original sequence: turn off 5 event switches, collect, turn on again.
   -- Never toggle Chilli's separate Auto Collect Eggs switch.
-  local off=toggle5()
-  if off~=5 then error('ปิด Halloween Event ได้ '..off..'/5; ตรวจสถานะด้วยตนเองก่อนเก็บ') end
-  toggledAll=true
+  local success,changedNow,why=setEventsOff()
+  changed=changedNow
+  if not success then error('ไม่สามารถปิด Event: '..tostring(why)) end
   task.wait(1)
   local selected={}
   for _,c in ipairs(cardCache) do
@@ -387,10 +426,7 @@ local function collect(requestId,source)
  end)
  -- Always restore the five switches after a complete initial toggle, even on error.
  -- If the first toggle was partial, never blindly toggle again.
- if toggledAll and alive() then
-  local on=toggle5()
-  if on~=5 then warn('EggMonitor: เปิด Event กลับได้ '..on..'/5; ตรวจสวิตช์ด้วยตนเอง') end
- end
+ if alive() then restoreEvents(changed) end
  if not ok then warn('EggMonitor collect: '..tostring(err)) end
  busy=false
  return ok
