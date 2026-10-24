@@ -167,6 +167,35 @@ local function weightOf(name)
  if count>1 then return "รอตรวจสอบ (ไข่ชื่อซ้ำ)" end
  return "รอตรวจสอบ (ยังไม่พบ EggWeight)"
 end
+-- Match the Map Eggs card by name. Only accept a unique card as evidence.
+local function basketEvidence(name)
+ local matches=0
+ local basket=false
+ for _,root in ipairs(roots) do
+  for _,v in ipairs(root:GetDescendants()) do
+   if v:IsA("TextLabel") and v.Text==name then
+    local parent=v.Parent
+    for depth=1,4 do
+     if not parent then break end
+     local textParts={}
+     for _,x in ipairs(parent:GetDescendants()) do
+      if x:IsA("TextLabel") then textParts[#textParts+1]=x.Text:lower() end
+     end
+     local text=table.concat(textParts," ")
+     if text:find("in basket",1,true) then
+      matches=matches+1;basket=true;break
+     end
+     if text:find("queued",1,true) or text:find("collect",1,true) then
+      matches=matches+1;break
+     end
+     parent=parent.Parent
+    end
+   end
+  end
+ end
+ return matches==1 and basket
+end
+
 local function readTime()
  local main=PG:FindFirstChild("Main")
  local dn=main and main:FindFirstChild("DayNightRotation")
@@ -234,6 +263,9 @@ env.RideEggTracked = env.RideEggTracked or {}
 local tracked=env.RideEggTracked
 local pending={}
 local autoEnabled=false
+local dawnNotified=false
+local collectClaims={}
+local pendingMissing={}
 local busy=false
 local activeSource={}
 local lastAutoAttempt={}
@@ -289,40 +321,32 @@ local function announce(e,record)
  end
 end
 local function confirmCollected(record,source)
- if record.state~="active" then return end
- local title=source=="auto" and "✅ ระบบ AUTO เก็บ " or "✅ กดเก็บ "
- record.state=source or "telegram"
- finalize(record,title..record.name.." สำเร็จ")
+ if record.state~="active" and record.state~="missing" then return end
+ if record.notifiedSuccess then return end
+ local prefix=source=="telegram" and "✅ กดเก็บ " or (source=="auto" and "✅ ระบบ AUTO เก็บ " or "✅ ระบบ Chilli เก็บ ")
+ record.notifiedSuccess=true
+ record.state="collected"
+ pendingMissing[record.id]=nil
  pending[record.id]=nil
- send(title..record.name.." สำเร็จ")
+ finalize(record,prefix..record.name.." สำเร็จ")
+ send(prefix..record.name.." สำเร็จ")
 end
 local function markMissing(record,phase,seconds)
  if record.state~="active" then return end
- if pending[record.id] then
-  -- A disappearing ID is not sufficient proof of collection.
-  record.state="uncertain"
-  finalize(record,"⚠️ รอตรวจสอบผลการเก็บไข่")
-  return
- end
- -- If near the night->day transition, defer classification until the new day.
- if phase=="NIGHT" and seconds and seconds<=60 then
-  record.state="await-reset"
-  record.missingAt=os.clock()
-  pendingReset[record.id]=record
-  return
- end
- record.state="uncertain"
- finalize(record,"⚠️ ไข่หายจาก ActiveEggs ยังยืนยันการเก็บไม่ได้")
- send("⚠️ ยังยืนยันไม่ได้ว่าไข่ถูกเก็บหรือรีเซ็ต\n"..describe(record))
+ record.state="missing"
+ record.missingAt=os.clock()
+ record.missingPhase=phase
+ record.missingSeconds=seconds
+ pendingMissing[record.id]=record
 end
 local function settleReset()
- for id,record in pairs(pendingReset) do
-  if record.state=="await-reset" then
+ for id,record in pairs(pendingMissing) do
+  if record.state=="missing" then
    record.state="reset"
-   finalize(record,"⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว")
-   send("⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว\n"..describe(record))
+   finalize(record,"❌ ไข่ถูกรีเซ็ต ไม่มีระบบไหนเก็บไปได้")
+   send("❌ ไข่ถูกรีเซ็ต ไม่มีระบบไหนเก็บไปได้\n"..describe(record))
   end
-  pendingReset[id]=nil
+  pendingMissing[id]=nil
  end
 end
 local function detectTime()
@@ -331,18 +355,13 @@ local function detectTime()
  if lastPhase and phase~=lastPhase then
   if lastPhase=="NIGHT" and phase=="DAY" then
    cycle=cycle+1
-    dawnCycle=dawnCycle+1
-    dawnStarted=false
-   -- At sunrise, eggs that were active in the preceding cycle may have reset.
-   for id,record in pairs(tracked) do
-    if record.state=="active" and record.cycle<cycle and not Active:FindFirstChild(id) then
-     record.state="reset"
-     send("⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว\n"..describe(record))
-    end
-   end
-   settleReset()
-  elseif lastPhase=="DAY" and phase=="NIGHT" then
-   -- A missing egg at dusk is not automatically considered a reset.
+   dawnCycle=dawnCycle+1
+   dawnStarted=false
+   dawnNotified=false
+   -- Allow final basket checks before declaring the reset.
+   task.delay(4,function()
+    if alive() then settleReset() end
+   end)
   end
   warned={DAY=false,NIGHT=false}
  elseif lastSeconds and seconds>lastSeconds+60 then
@@ -356,17 +375,11 @@ local function detectTime()
   end
   if hasEgg then
    warned[phase]=true
-   if phase=="DAY" then send("🌙 อีก 1 นาที จะเข้าสู่กลางคืน")
-   else send("☀️ อีก 1 นาที จะเข้าสู่ตอนเช้า") end
-  end
- end
- -- If the countdown wrapped while image remained unchanged, avoid indefinite pending.
- if phase=="NIGHT" and seconds>60 then
-  for id,record in pairs(pendingReset) do
-   if os.clock()-(record.missingAt or 0)>35 then
-    record.state="other";pendingReset[id]=nil
-    finalize(record,"🥚 ไข่ถูกเก็บแล้ว (ไม่ได้เก็บผ่าน Telegram)")
-    send("🥚 ไข่ถูกเก็บแล้ว (ไม่ได้เก็บผ่าน Telegram)\n"..describe(record))
+   if phase=="DAY" then
+    send("🌙 อีก 1 นาที จะเข้าสู่กลางคืน")
+   else
+    dawnNotified=true
+    send("☀️ อีก 1 นาที จะเข้าสู่ตอนเช้า")
    end
   end
  end
@@ -378,6 +391,7 @@ local function collectCycle(requestId,source)
  local chosen=Active:FindFirstChild(requestId)
  if not chosen or not EGGS[eggName(chosen)] then return end
  busy=true
+ collectClaims[requestId]={source=source,at=os.clock()}
  local changed={}
  local function work()
   local n
@@ -407,11 +421,11 @@ local function collectCycle(requestId,source)
     if not Active:FindFirstChild(id) then
      watching[id]=nil
      local record=tracked[id]
-     -- Disappearance alone is NOT proof of collection.
-     if record and record.state=="active" then
-      record.state="uncertain"
-      finalize(record,"⏳ สั่งเก็บแล้ว กำลังตรวจสอบผล")
-      send("⏳ สั่งเก็บแล้ว ยังยืนยันผลไม่ได้: "..record.name)
+     -- Wait for an actual basket state before reporting success.
+     if record and basketEvidence(record.name) then
+      confirmCollected(record,source)
+     elseif record and record.state=="active" then
+      markMissing(record,select(1,readTime()),select(2,readTime()))
      end
     end
    end
@@ -439,6 +453,17 @@ task.spawn(function()
   if data then
    for _,u in ipairs(data.result or {}) do
     offset=math.max(offset,u.update_id+1)
+    local message=u.message
+    if message and message.chat and tostring(message.chat.id)==tostring(CHAT) then
+     local cmd=tostring(message.text or ""):lower():match("^%s*(.-)%s*$")
+     if cmd=="auto" then
+      autoEnabled=true
+      send("🤖 เปิด AUTO สำรองแล้ว จะเก็บไข่ที่เหลือหลังแจ้งเตือน 1 นาทีก่อนเช้า")
+     elseif cmd=="stop" then
+      autoEnabled=false
+      send("🛑 ปิด AUTO สำรองแล้ว ระบบตรวจไข่และปุ่ม Telegram ยังทำงาน")
+     end
+    end
     local cb=u.callback_query
     if cb and type(cb.data)=="string" and cb.data:sub(1,1)=="C" then
      local source=cb.message and cb.message.chat and tostring(cb.message.chat.id)
@@ -455,7 +480,7 @@ task.spawn(function()
  while alive() do
   if autoEnabled and env.EggMonitorEnabled and not busy then
    local phase,seconds=readTime()
-   if phase=="NIGHT" and seconds and seconds<=60 then
+   if phase=="NIGHT" and seconds and seconds<=60 and dawnNotified then
     for _,e in ipairs(Active:GetChildren()) do
      if EGGS[eggName(e)] and not pending[e.Name] and not lastAutoAttempt[e.Name] then
       lastAutoAttempt[e.Name]=true
@@ -480,7 +505,7 @@ task.spawn(function()
     if EGGS[name] then
      local id=e.Name
      present[id]=true
-     if not tracked[id] or tracked[id].state~="active" then
+     if not tracked[id] then
       tracked[id]={id=id,name=name,state="active",cycle=cycle,spawnedAt=os.time(),spawnedMs=DateTime.now().UnixTimestampMillis,lastEditMinute=-1}
       task.spawn(announce,e,tracked[id])
      end
@@ -491,12 +516,15 @@ task.spawn(function()
    detectTime()
    for id,record in pairs(tracked) do
     if record.state=="active" and not present[id] then
-     if sunrise and record.cycle<cycle and not pending[id] then
-      record.state="reset"
-      finalize(record,"⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว")
-      send("⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว\n"..describe(record))
-     else
-      markMissing(record,phase,seconds)
+     markMissing(record,phase,seconds)
+    end
+    if record.state=="missing" then
+     if basketEvidence(record.name) then
+      local claim=collectClaims[id]
+      local source=claim and claim.source or "chilli"
+      confirmCollected(record,source)
+     elseif sunrise then
+      -- Reset will be finalized after the sunrise grace period.
      end
     end
    end
