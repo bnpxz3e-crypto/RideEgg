@@ -37,7 +37,7 @@ local function api(method,data)
  if not ok or not res then return nil end
  local yes,obj=pcall(function() return HS:JSONDecode(res.Body or "{}") end)
  if yes and obj and obj.ok then return obj end
- if method=="editMessageCaption" or method=="editMessageText" then
+ if true then
   warn("[EGG TIMER] Telegram edit failed: "..tostring(yes and obj and obj.description or res.Body))
  end
  return nil
@@ -230,8 +230,13 @@ end
 local function eggName(e) return e:GetAttribute("Egg") end
 local function describe(r) return (EGGS[r.name] and EGGS[r.name].icon or "🥚").." "..r.name end
 local function announce(e,record)
+ if record.sending or record.messageId or record.state~="active" then return end
+ record.sending=true
  task.wait(2)
- if not alive() or not env.EggMonitorEnabled or not e.Parent or record.state~="active" then return end
+ if not alive() or not env.EggMonitorEnabled or not e.Parent or record.state~="active" then
+  record.sending=false
+  return
+ end
  local item=EGGS[record.name]
  record.weight=weightOf(record.name)
  local keyboard={inline_keyboard={{{text="🥚 เก็บไข่",callback_data="C"..record.id}}}}
@@ -245,8 +250,12 @@ local function announce(e,record)
  end
  if res and res.result then
   record.messageId=res.result.message_id
+  print("[EGG] SENT",record.name,record.id)
   if record.finalStatus then editEggMessage(record,record.finalStatus) end
+ else
+  warn("[EGG] SEND FAILED",record.name,record.id)
  end
+ record.sending=false
 end
 local function confirmCollected(record)
  if record.state~="active" then return end
@@ -438,7 +447,11 @@ task.spawn(function()
      present[id]=true
      if not tracked[id] or tracked[id].state~="active" then
       tracked[id]={id=id,name=name,state="active",cycle=cycle,spawnedAt=os.time(),spawnedMs=DateTime.now().UnixTimestampMillis,lastEditMinute=-1}
-      task.spawn(announce,e,tracked[id])
+     end
+     local r=tracked[id]
+     if not r.messageId and not r.sending and (os.clock()-(r.lastAttempt or 0)>=15) then
+      r.lastAttempt=os.clock()
+      task.spawn(announce,e,r)
      end
     end
    end
