@@ -75,58 +75,41 @@ local function thumbnail(id)
  local item=yes and data.data and data.data[1]
  return item and item.state=="Completed" and item.imageUrl or nil
 end
+-- Use the exact Chilli Hub switch path and Activated handler from the user's original code.
 local function press(b)
- if not b or not b:IsA("GuiButton") then return false end
- local called=false
- if getconnections then
-  for _,signal in ipairs({b.Activated,b.MouseButton1Click,b.MouseButton1Down}) do
-   local ok,connections=pcall(getconnections,signal)
-   if ok and connections then
-    for _,c in ipairs(connections) do
-     if c.Function then
-      local success=pcall(c.Function)
-      if success then called=true;break end
-     end
-    end
-   end
-   if called then break end
+ if not b or not b:IsA("GuiButton") or not getconnections then return false end
+ local done=false
+ pcall(function()
+  for _,c in ipairs(getconnections(b.Activated)) do
+   if c.Function then c.Function();done=true end
   end
- end
- return called
+ end)
+ return done
 end
 local function switchButton(name)
  for _,root in ipairs(roots) do
-  for _,v in ipairs(root:GetDescendants()) do
-   if (v:IsA("TextLabel") or v:IsA("TextButton")) and v.Text==name then
-    local row=v.Parent
-    for _=1,3 do
-     if not row then break end
-     local sw=row:FindFirstChild("Switch",true)
-     local b=sw and sw:FindFirstChild("Button",true)
-     if b and b:IsA("GuiButton") then return b,sw end
-     row=row.Parent
-    end
-   end
+  local v=root:FindFirstChild(name,true)
+  if v then
+   local sw=v:FindFirstChild("Switch",true)
+   local b=sw and sw:FindFirstChild("Button",true)
+   if b and b:IsA("GuiButton") then return b end
   end
  end
 end
--- Preserve the original five-switch routine, but restore only what was toggled.
 local function toggle5()
  local changed={}
  for _,name in ipairs(SWITCHES) do
   if not alive() then break end
-  local b=switchButton(name)
-  if b and press(b) then table.insert(changed,name) end
-  task.wait(.25)
+  if press(switchButton(name)) then table.insert(changed,name) end
+  task.wait(.3)
  end
  return #changed,changed
 end
 local function restore5(changed)
  local n=0
  for i=#changed,1,-1 do
-  local b=switchButton(changed[i])
-  if b and press(b) then n=n+1 end
-  task.wait(.25)
+  if press(switchButton(changed[i])) then n=n+1 end
+  task.wait(.3)
  end
  return n
 end
@@ -153,35 +136,36 @@ local function cards()
  end
  return found
 end
+-- Read only the EggWeight inside the SAME Chilli Map Eggs card.
+-- Do not climb through unrelated parent containers: that mixed weights of other eggs.
 local function weightOf(name)
- -- Map Eggs can contain multiple copies of the same name; never guess.
  local matches={}
- for _,root in ipairs(roots) do
-  for _,v in ipairs(root:GetDescendants()) do
-   if v:IsA("TextLabel") and v.Text==name then
-    local row=v.Parent
-    for _=1,3 do
-     if not row then break end
-     local weight=row:FindFirstChild("EggWeight",true)
-     if weight and weight:IsA("TextLabel") and weight.Text:lower():find("kg",1,true) then
-      matches[weight.Text]=true
+ for _,card in ipairs(cards()) do
+  if card.name==name then
+   local p=card.label.Parent
+   for _=1,4 do
+    if not p then break end
+    local w=p:FindFirstChild("EggWeight",true)
+    if w and w:IsA("TextLabel") and w.Text~="" then
+     matches[w.Text]=true
+     break
+    end
+    for _,x in ipairs(p:GetDescendants()) do
+     if x:IsA("TextLabel") and x~=card.label and x.Text:lower():find("kg",1,true) then
+      matches[x.Text]=true
       break
      end
-     for _,child in ipairs(row:GetDescendants()) do
-      if child:IsA("TextLabel") and child.Text:match("^%s*[%d,.]+%s*[KMBkmb]?%s*KG%s*$") then
-       matches[child.Text]=true
-      end
-     end
-     row=row.Parent
     end
+    if next(matches) then break end
+    p=p.Parent
    end
   end
  end
  local value,count=nil,0
  for w in pairs(matches) do value=w;count=count+1 end
  if count==1 then return value end
- if count>1 then return "รอตรวจสอบ (มีไข่ชื่อซ้ำ)" end
- return "รอตรวจสอบน้ำหนักจาก Map Eggs"
+ if count>1 then return "รอตรวจสอบ (ไข่ชื่อซ้ำ)" end
+ return "รอตรวจสอบ (ยังไม่พบ EggWeight)"
 end
 local function readTime()
  local main=PG:FindFirstChild("Main")
@@ -426,8 +410,8 @@ local function collectCycle(requestId,source)
      -- Disappearance alone is NOT proof of collection.
      if record and record.state=="active" then
       record.state="uncertain"
-      finalize(record,"⚠️ กดเก็บแล้ว แต่ยังยืนยันผลไม่ได้")
-      send("⚠️ กดเก็บแล้ว รอตรวจสอบผล: "..record.name)
+      finalize(record,"⏳ สั่งเก็บแล้ว กำลังตรวจสอบผล")
+      send("⏳ สั่งเก็บแล้ว ยังยืนยันผลไม่ได้: "..record.name)
      end
     end
    end
