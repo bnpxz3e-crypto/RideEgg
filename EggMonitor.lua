@@ -182,20 +182,19 @@ local function render()
   "Telegram: "..tg.."\n"..
   "ล่าสุด: "..stats.last
 end
-local StarterGui=game:GetService("StarterGui")
-local function notifyPower(enabled)
- local msg=enabled and "เปิดระบบตรวจไข่แล้ว" or "ปิดระบบตรวจไข่แล้ว"
- pcall(function()
-  StarterGui:SetCore("SendNotification",{
-   Title="EGG MONITOR",Text=msg,Duration=5
-  })
- end)
-end
+-- Forward declaration: Telegram send is initialized after the request queue.
+local send
 power.Activated:Connect(function()
  env.EggMonitorEnabled=not env.EggMonitorEnabled
- status(env.EggMonitorEnabled and "เปิดตรวจไข่แล้ว" or "หยุดตรวจไข่ชั่วคราว")
- notifyPower(env.EggMonitorEnabled)
+ local enabled=env.EggMonitorEnabled
+ status(enabled and "เปิดตรวจไข่แล้ว" or "หยุดตรวจไข่ชั่วคราว")
  render()
+ task.spawn(function()
+  if send then
+   send(enabled and "🟢 เปิดระบบตรวจไข่แล้ว\n🥚 Egg Monitor เริ่มตรวจไข่และแจ้งเตือนตามปกติ" or
+    "🔴 ปิดระบบตรวจไข่แล้ว\n🥚 หยุดตรวจและแจ้งไข่ชั่วคราว (Telegram ยังรับคำสั่ง Auto / stop ได้)")
+  end
+ end)
 end)
 mini.Activated:Connect(function()
  if miniMoved then miniMoved=false;return end
@@ -227,7 +226,7 @@ end
 local function api(method,data)
  return awaitJob(enqueue(method,data),nil)
 end
-local function send(s)
+send=function(s)
  return api("sendMessage",{chat_id=CHAT,text=s})
 end
 local function fireStatus(s) status(s);render() end
