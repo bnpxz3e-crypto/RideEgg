@@ -1,5 +1,6 @@
 -- Ride A Pet | Egg Monitor (Telegram throttling + compact Roblox status GUI)
--- IMPORTANT: Revoke the previously exposed Telegram token in BotFather.
+-- IMPORTANT: Revoke all previously exposed Telegram tokens in BotFather.
+-- Telegram bot commands: Auto / stop. Set TOKEN and CHAT locally.
 local TOKEN = "8455689997:AAHwzIdo53Eo4v1IdaONYYkUhR8yGylUaCI"
 local CHAT = "1813392489"
 
@@ -16,6 +17,7 @@ local env = (getgenv and getgenv()) or _G
 env.RideEggRun = (env.RideEggRun or 0) + 1
 local run = env.RideEggRun
 env.EggMonitorEnabled = true
+env.RideEggAuto = env.RideEggAuto or false
 local function alive() return env.RideEggRun == run end
 
 local EGGS = {
@@ -173,6 +175,7 @@ local function render()
  local waitFor=math.max(0,math.ceil(stats.blockedUntil-os.time()))
  local tg=waitFor>0 and ("HTTP 429: รอ "..math.ceil(waitFor/60).." นาที") or stats.telegram
  info.Text="ระบบ: "..(on and "เปิดอยู่" or "ปิดอยู่").."\n"..
+  "Auto ก่อนเช้า: "..(env.RideEggAuto and "เปิด" or "ปิด").."\n"..
   "ไข่เป้าหมายในเซิร์ฟ: "..stats.active.." ใบ\n"..
   "แจ้งไข่แล้ว: "..stats.found.." ใบ\n"..
   "ส่งข้อความ/รูปสำเร็จ: "..stats.sent.." ครั้ง\n"..
@@ -347,6 +350,34 @@ local function weightOf(name)
  end
  return "กำลังอัปเดต"
 end
+-- Read the visible Map Eggs card state. "In basket" is evidence of collection,
+-- but a same-name card cannot identify an individual egg if duplicates exist.
+local function basketCount(name)
+ local count=0
+ local seen={}
+ for _,root in ipairs(roots) do
+  for _,v in ipairs(root:GetDescendants()) do
+   if v:IsA("TextLabel") and v.Text==name then
+    local card=v.Parent
+    for _=1,4 do
+     if not card then break end
+     local basket=false
+     for _,x in ipairs(card:GetDescendants()) do
+      if (x:IsA("TextLabel") or x:IsA("TextButton")) and
+        x.Text:lower():find("in basket",1,true) then basket=true;break end
+     end
+     if basket then
+      if not seen[v] then count=count+1;seen[v]=true end
+      break
+     end
+     card=card.Parent
+    end
+   end
+  end
+ end
+ return count
+end
+
 local function readTime()
  local main=PG:FindFirstChild("Main")
  local dn=main and main:FindFirstChild("DayNightRotation")
@@ -373,6 +404,10 @@ for id,r in pairs(tracked) do
 end
 local pending={}
 local pendingReset={}
+local autoBusy=false
+local autoWindow=false
+local autoAttempted={}
+local autoRound=0
 local busy=false
 local lastPhase,lastSeconds=nil,nil
 local cycle=0
@@ -436,12 +471,12 @@ local function announce(e,r)
  end
  r.sending=false
 end
-local function confirmCollected(r)
+local function confirmCollected(r,source)
  if not r or r.state~="active" then return end
- r.state="telegram"
- finalize(r,"✅ สำเร็จ")
+ r.state=source=="auto" and "auto" or "telegram"
+ finalize(r,source=="auto" and "✅ Auto เก็บไข่สำเร็จแล้ว" or "✅ สำเร็จ")
  pending[r.id]=nil
- task.spawn(send,"✅ ไข่ "..r.name.." ถูกเก็บสำเร็จแล้ว")
+ task.spawn(send,source=="auto" and ("🤖 Auto เก็บไข่สำเร็จแล้ว\n"..r.name) or ("✅ ไข่ "..r.name.." ถูกเก็บสำเร็จแล้ว"))
 end
 -- Egg disappearing from ActiveEggs does NOT prove Chilli Hub collected it.
 -- Only a confirmed Chilli Hub collection event could justify a success notice.
@@ -454,6 +489,16 @@ local function notifyUncertain(r,stillVisible)
   "⚠️ ยังพบไข่บน Map Eggs แต่ Egg ID เปลี่ยน/หายจาก ActiveEggs\n" or
   "⚠️ ไข่หายจาก ActiveEggs แต่ยังยืนยันว่าเก็บสำเร็จไม่ได้\n"
  task.spawn(send,msg..icon.." "..r.name.."\nกรุณาตรวจสอบในเกม อย่าเพิ่งถือว่าเก็บแล้ว")
+end
+local function markChilliCollected(r)
+ if r.state~="active" and r.state~="missing" then return end
+ r.state="chilli"
+ finalize(r,"✅ Chilli hub เก็บไข่ให้แล้ว")
+ if not r.chilliNoticeSent then
+  r.chilliNoticeSent=true
+  task.spawn(send,"✅ Chilli hub เก็บไข่ให้แล้ว\n"..((EGGS[r.name] and EGGS[r.name].icon) or "🥚").." "..r.name)
+ end
+ fireStatus(r.name.." → Chilli Hub เก็บแล้ว (In basket)")
 end
 local function markUncertain(r)
  if r.state~="active" and r.state~="missing" then return end
@@ -518,11 +563,12 @@ local function detectTime()
  end
 end
 
-local function collectCycle(requestId)
- if busy then fireStatus("กำลังเก็บไข่รอบก่อนอยู่");return end
- if not env.EggMonitorEnabled then fireStatus("Egg Monitor ปิดอยู่");return end
+local function collectCycle(requestId,source)
+ source=source or "telegram"
+ if busy then fireStatus("กำลังเก็บไข่รอบก่อนอยู่");return false end
+ if not env.EggMonitorEnabled then fireStatus("Egg Monitor ปิดอยู่");return false end
  local chosen=Active:FindFirstChild(requestId)
- if not chosen or not EGGS[eggName(chosen)] then fireStatus("ไข่จากปุ่มนี้หายไปแล้ว");return end
+ if not chosen or not EGGS[eggName(chosen)] then fireStatus("ไข่จากปุ่มนี้หายไปแล้ว");return false end
  busy=true
  local offAttempted=false
  local function work()
@@ -552,6 +598,7 @@ local function collectCycle(requestId)
     if not used[id] and Active:FindFirstChild(id) then
      if press(card.button) then
       used[id]=true;watching[id]=true;pending[id]=true
+      if source=="auto" then autoAttempted[id]=true end
       count=count+1
       fireStatus("สั่งเก็บ "..count.."/"..MAX_COLLECT..": "..card.name)
      end
@@ -562,11 +609,11 @@ local function collectCycle(requestId)
   end
   if count==0 then fireStatus("ไม่พบปุ่ม Collect ที่กดได้") end
   local start=os.clock()
-  while alive() and next(watching) and os.clock()-start<COLLECT_TIMEOUT do
+  while alive() and next(watching) and os.clock()-start<(source=="auto" and 40 or COLLECT_TIMEOUT) do
    for id in pairs(watching) do
     if not Active:FindFirstChild(id) then
      watching[id]=nil
-     confirmCollected(tracked[id])
+     confirmCollected(tracked[id],source)
      pending[id]=nil
     end
    end
@@ -576,7 +623,7 @@ local function collectCycle(requestId)
    pending[id]=nil
    fireStatus("ยังยืนยันการเก็บไข่ไม่ได้: "..id)
   end
-  if count>0 and not next(watching) then task.wait(REOPEN_DELAY) end
+  if count>0 and not next(watching) and source~="auto" then task.wait(REOPEN_DELAY) end
   local on=toggle5();offAttempted=false
   fireStatus("เปิด Halloween Event กลับ "..on.."/5")
  end
@@ -588,6 +635,41 @@ local function collectCycle(requestId)
  end
  for id in pairs(pending) do pending[id]=nil end
  busy=false
+ return ok
+end
+
+-- Auto only runs in the final minute of NIGHT. Never collects outside this window.
+-- Each attempt handles at most two eggs, with retries limited to one per ID per dawn.
+local function autoCollectWindow()
+ if autoBusy then return end
+ autoBusy=true
+ fireStatus("Auto: เริ่มตรวจไข่ก่อนเช้า")
+ while alive() and env.RideEggAuto and env.EggMonitorEnabled do
+  local phase,seconds=readTime()
+  if phase~="NIGHT" or not seconds or seconds>60 then break end
+  if busy then task.wait(1)
+  else
+   local chosen=nil
+   for _,e in ipairs(Active:GetChildren()) do
+    if EGGS[eggName(e)] and not autoAttempted[e.Name] then
+     local r=tracked[e.Name]
+     if not r or r.state=="active" then
+      chosen=e.Name;break
+     end
+    end
+   end
+   if not chosen then task.wait(1)
+   else
+    autoAttempted[chosen]=true
+    -- Only start a collection when enough time remains to run the cycle.
+    if seconds<=8 then break end
+    collectCycle(chosen,"auto")
+    task.wait(.5)
+   end
+  end
+ end
+ autoBusy=false
+ fireStatus("Auto: จบรอบก่อนเช้า รอรอบถัดไป")
 end
 
 -- Long-polling via serialized API. Avoid concurrent getUpdates requests.
@@ -597,15 +679,28 @@ task.spawn(function()
   return
  end
  local offset=0
- local init=api("getUpdates",{timeout=0,limit=100,allowed_updates={"callback_query"}})
+ local init=api("getUpdates",{timeout=0,limit=100,allowed_updates={"callback_query","message"}})
  if init then
   for _,u in ipairs(init.result or {}) do offset=math.max(offset,u.update_id+1) end
  end
  while alive() do
-  local data=api("getUpdates",{offset=offset,timeout=0,limit=50,allowed_updates={"callback_query"}})
+  local data=api("getUpdates",{offset=offset,timeout=0,limit=50,allowed_updates={"callback_query","message"}})
   if data then
    for _,u in ipairs(data.result or {}) do
     offset=math.max(offset,u.update_id+1)
+    local message=u.message
+    if message and message.chat and tostring(message.chat.id)==CHAT then
+     local cmd=tostring(message.text or ""):lower():match("^%s*(.-)%s*$")
+     if cmd=="auto" then
+      env.RideEggAuto=true
+      fireStatus("Auto เปิดแล้ว: รอ 1 นาทีก่อนเช้า")
+      task.spawn(send,"🤖 เปิด Auto เก็บไข่แล้ว\n⏰ เก็บเฉพาะ 1 นาทีก่อนเข้าสู่ตอนเช้า ทุกวันจนกว่าจะพิมพ์ stop")
+     elseif cmd=="stop" then
+      env.RideEggAuto=false
+      fireStatus("Auto ปิดแล้ว")
+      task.spawn(send,"🛑 ปิด Auto แล้ว (ยังแจ้งไข่และกดเก็บเองได้)")
+     end
+    end
     local cb=u.callback_query
     if cb and type(cb.data)=="string" and cb.data:sub(1,1)=="C" then
      local source=cb.message and cb.message.chat and tostring(cb.message.chat.id)
@@ -649,15 +744,38 @@ task.spawn(function()
    stats.active=count
    local sunrise=lastPhase=="NIGHT" and phase=="DAY"
    detectTime()
+   local inWindow=(phase=="NIGHT" and seconds and seconds<=60)
+   if inWindow and not autoWindow then
+    autoRound=autoRound+1
+    autoAttempted={}
+   end
+   autoWindow=not not inWindow
+   if inWindow and env.RideEggAuto and not autoBusy then
+    task.spawn(autoCollectWindow)
+   end
    for id,r in pairs(tracked) do
     if (r.state=="active" or r.state=="missing") and not present[id] then
      if sunrise and not pending[id] then
-      r.state="reset"
-      finalize(r,"❌ ไข่โดนรีเซ็ต")
+      if basketCount(r.name)>0 then
+       markChilliCollected(r)
+      else
+       r.state="reset"
+       finalize(r,"❌ ไข่โดนรีเซ็ต")
+      end
      elseif r.state=="active" then
       markMissing(r,phase,seconds)
      elseif r.state=="missing" and os.clock()-(r.missingAt or os.clock())>=MISSING_GRACE then
-      markUncertain(r)
+      local sameType=0
+      for _,other in pairs(tracked) do
+       if other.name==r.name and (other.state=="active" or other.state=="missing") then
+        sameType=sameType+1
+       end
+      end
+      if basketCount(r.name)>0 and sameType==1 then
+       markChilliCollected(r)
+      else
+       markUncertain(r)
+      end
      end
     end
    end
