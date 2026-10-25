@@ -1,8 +1,7 @@
 -- Ride A Pet | Cherub Route + Egg Monitor (Delta)
 -- Set Telegram config before running, if needed:
-getgenv().CherubTelegramToken = "8455689997:AAHwzIdo53Eo4v1IdaONYYkUhR8yGylUaCI"
-getgenv().CherubTelegramChat = "1813392489"
-
+-- getgenv().CherubTelegramToken = "YOUR_NEW_BOT_TOKEN"
+-- getgenv().CherubTelegramChat = "YOUR_CHAT_ID"
 local Players = game:GetService('Players')
 local RunService = game:GetService('RunService')
 local VIM = game:GetService('VirtualInputManager')
@@ -23,46 +22,104 @@ local DEST={
  {label='จุดเริ่มต้น',pos=Vector3.new(-484.85,42429.79,907.94)},
  {label='จุดที่ 1',pos=Vector3.new(-459.16,42430.86,879.43),hold=3,equip=true},
  {label='จุดที่ 2',pos=Vector3.new(-516.71,42431.29,927.74),hold=3,equip=true},
- {label='จุดที่ 3',pos=Vector3.new(-539.43,42432.33,848.25),hold=3,equip=true},
+ {label='จุดที่ 3',pos=Vector3.new(-535.27, 42432.49, 851.91),hold=3,equip=true},
  {label='จุดที่ 4',pos=Vector3.new(-496.58,42430.93,893.82),hold=2},
  {label='บ้าน',pos=Vector3.new(174.74,40316.42,1061.15)}
 }
 local CAMERA={
  [1]=CFrame.new(-471.368866,42436.234375,907.315430)*CFrame.fromOrientation(-0.16520408,-0.11923753,0),
  [2]=CFrame.new(-490.110229,42437.496094,922.611450)*CFrame.fromOrientation(-0.19392118,1.49393189,0),
- [3]=CFrame.new(-519.581116,42439.113281,866.312988)*CFrame.fromOrientation(-0.20994413,0.72658545,0),
+ [3]=CFrame.new(-519.998230, 42443.585938, 870.434570)*CFrame.fromOrientation(-0.36286411,0.69170344,0),
  [4]=CFrame.new(-481.348175,42436.113281,918.115417)*CFrame.fromOrientation(-0.15176621,0.58706641,0)
 }
+-- Chilli-inspired compact panel; all controls belong to our own GUI.
 local gui=Instance.new('ScreenGui')
 gui.Name='CherubComboPanel';gui.ResetOnSpawn=false;gui.DisplayOrder=995;gui.Parent=pg
-local function corner(o,r) Instance.new('UICorner',o).CornerRadius=UDim.new(0,r or 9) end
+local function corner(o,r) Instance.new('UICorner',o).CornerRadius=UDim.new(0,r or 3) end
 local frame=Instance.new('Frame')
-frame.Size=UDim2.fromOffset(330,290);frame.Position=UDim2.new(.5,-165,.3,0)
-frame.BackgroundColor3=Color3.fromRGB(22,28,40);frame.Active=true;frame.Draggable=true;frame.Parent=gui
-corner(frame,12)
-local function label(text,y,h,size)
- local v=Instance.new('TextLabel');v.Size=UDim2.new(1,-20,0,h);v.Position=UDim2.fromOffset(10,y)
- v.BackgroundTransparency=1;v.Text=text;v.TextSize=size or 15;v.TextColor3=Color3.fromRGB(218,232,255)
- v.Font=Enum.Font.Gotham;v.TextWrapped=true;v.Parent=frame;return v
-end
-local title=label('👼 Cherub Route + Egg Monitor',5,30,18)
-title.Font=Enum.Font.GothamBold
-local function btn(txt,x,y,w,h,color)
+frame.Name='MainPanel'
+frame.Size=UDim2.fromOffset(365,350)
+frame.Position=UDim2.new(.5,-182,.25,0)
+frame.BackgroundColor3=Color3.fromRGB(13,17,21)
+frame.BorderSizePixel=0;frame.Active=true;frame.Draggable=true;frame.Parent=gui
+local border=Instance.new('UIStroke',frame)
+border.Color=Color3.fromRGB(65,67,69);border.Thickness=2
+local header=Instance.new('Frame')
+header.Size=UDim2.new(1,0,0,45);header.BackgroundColor3=Color3.fromRGB(218,42,29)
+header.BorderSizePixel=0;header.Parent=frame
+local hgrad=Instance.new('UIGradient',header)
+hgrad.Color=ColorSequence.new(Color3.fromRGB(255,84,63),Color3.fromRGB(166,13,11))
+hgrad.Rotation=90
+local title=Instance.new('TextLabel')
+title.Size=UDim2.new(1,-105,1,0);title.Position=UDim2.fromOffset(14,0)
+title.BackgroundTransparency=1;title.Text='👼 Cherub Hub';title.TextColor3=Color3.new(1,1,1)
+title.TextStrokeTransparency=.25;title.Font=Enum.Font.GothamBlack;title.TextSize=22
+title.TextXAlignment=Enum.TextXAlignment.Left;title.Parent=header
+local function btn(txt,x,y,w,h,color,parent)
  local b=Instance.new('TextButton');b.Text=txt;b.Size=UDim2.fromOffset(w,h);b.Position=UDim2.fromOffset(x,y)
- b.BackgroundColor3=color;b.TextColor3=Color3.new(1,1,1);b.Font=Enum.Font.GothamBold;b.TextSize=15;b.Parent=frame;corner(b,8);return b
+ b.BackgroundColor3=color;b.BorderSizePixel=0;b.TextColor3=Color3.new(1,1,1)
+ b.Font=Enum.Font.GothamBold;b.TextSize=15;b.Parent=parent or frame
+ local stroke=Instance.new('UIStroke',b);stroke.Thickness=1.5;stroke.Color=Color3.fromRGB(80,85,92)
+ return b
 end
-local close=btn('X',290,4,35,32,Color3.fromRGB(204,65,57))
-local mini=btn('−',251,4,35,32,Color3.fromRGB(72,85,110))
-local routeBtn=btn('ROUTE : OFF',10,45,310,44,Color3.fromRGB(120,60,60))
-local speedLabel=label('ความเร็วบิน: 250 studs/s',95,24,15)
+local close=btn('X',324,6,34,32,Color3.fromRGB(178,39,30),header)
+local mini=btn('−',285,6,34,32,Color3.fromRGB(62,67,73),header)
+local function label(text,y,h,size)
+ local v=Instance.new('TextLabel');v.Size=UDim2.new(1,-24,0,h);v.Position=UDim2.fromOffset(12,y)
+ v.BackgroundTransparency=1;v.Text=text;v.TextSize=size or 15;v.TextColor3=Color3.fromRGB(232,238,246)
+ v.Font=Enum.Font.GothamBold;v.TextWrapped=true;v.TextXAlignment=Enum.TextXAlignment.Left
+ v.Parent=frame;return v
+end
+local section=label('⌄  Farm Status',51,28,19)
+section.TextColor3=Color3.fromRGB(184,217,250)
+local status=label('พร้อมใช้งาน • ปิด Chilli Auto Collect ก่อนเปิด Route',85,49,14)
+status.TextYAlignment=Enum.TextYAlignment.Center
+status.BackgroundTransparency=.3;status.BackgroundColor3=Color3.fromRGB(26,31,35)
+local routeHeading=label('⌄  Cherub Egg Route',139,28,19)
+routeHeading.TextColor3=Color3.fromRGB(184,217,250)
+local routeBtn=btn('Cherub Route    OFF',12,170,341,38,Color3.fromRGB(45,48,52))
+local speedLabel=label('ความเร็วบิน (studs/s)',214,26,14)
 local speedBox=Instance.new('TextBox')
-speedBox.Size=UDim2.fromOffset(105,32);speedBox.Position=UDim2.fromOffset(210,93)
-speedBox.Text='250';speedBox.PlaceholderText='100-1000';speedBox.TextSize=17;speedBox.ClearTextOnFocus=false
-speedBox.TextColor3=Color3.new(1,1,1);speedBox.BackgroundColor3=Color3.fromRGB(53,66,87);speedBox.Parent=frame;corner(speedBox,7)
-local monitorBtn=btn('EGG MONITOR : OFF',10,135,310,44,Color3.fromRGB(120,60,60))
-local status=label('พร้อมใช้งาน • ปิด Chilli Auto Collect ก่อนเปิด Route',184,80,14)
-status.TextYAlignment=Enum.TextYAlignment.Top
-local hint=label('Route วนซ้ำ | กลับบ้านรอ 5 วิ | E จุด 4 ไม่ขึ้น → เริ่มใหม่',265,19,11)
+speedBox.Size=UDim2.fromOffset(100,30);speedBox.Position=UDim2.fromOffset(250,212)
+speedBox.Text='250';speedBox.PlaceholderText='50-1000';speedBox.TextSize=17;speedBox.ClearTextOnFocus=false
+speedBox.TextColor3=Color3.new(1,1,1);speedBox.BackgroundColor3=Color3.fromRGB(49,55,62)
+speedBox.Parent=frame
+local speedStroke=Instance.new('UIStroke',speedBox);speedStroke.Color=Color3.fromRGB(100,110,120)
+local monitorHeading=label('⌄  Egg Notifications',250,27,19)
+monitorHeading.TextColor3=Color3.fromRGB(184,217,250)
+local monitorBtn=btn('Egg Monitor    OFF',12,279,341,38,Color3.fromRGB(45,48,52))
+local hint=label('Route วนลูป • กลับบ้านรอ 5 วิ • E จุด 4 ไม่ขึ้น = เริ่มใหม่',322,24,11)
+hint.TextColor3=Color3.fromRGB(165,174,188)
+-- Independent launcher remains visible when the large panel is hidden.
+local launcher=Instance.new('TextButton')
+launcher.Name='OpenCherubHub';launcher.Size=UDim2.fromOffset(68,68)
+launcher.Position=UDim2.new(.08,0,.28,0)
+launcher.BackgroundColor3=Color3.fromRGB(24,36,51)
+launcher.Text='👼';launcher.TextSize=36;launcher.TextColor3=Color3.new(1,1,1)
+launcher.BorderSizePixel=0;launcher.Active=true;launcher.Parent=gui
+Instance.new('UICorner',launcher).CornerRadius=UDim.new(1,0)
+local ls=Instance.new('UIStroke',launcher);ls.Thickness=3;ls.Color=Color3.fromRGB(69,173,246)
+-- Move the launcher without opening the panel when dragged.
+local dragStart,launcherStart,dragging,moved=nil,nil,false,false
+launcher.InputBegan:Connect(function(input)
+ if input.UserInputType==Enum.UserInputType.Touch or input.UserInputType==Enum.UserInputType.MouseButton1 then
+  dragging=true;dragStart=input.Position;launcherStart=launcher.Position;moved=false
+ end
+end)
+launcher.InputEnded:Connect(function(input)
+ if input.UserInputType==Enum.UserInputType.Touch or input.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end
+end)
+local dragConnection=UIS.InputChanged:Connect(function(input)
+ if dragging and dragStart and (input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch) then
+  local delta=input.Position-dragStart
+  if delta.Magnitude>8 then moved=true end
+  launcher.Position=UDim2.new(launcherStart.X.Scale,launcherStart.X.Offset+delta.X,launcherStart.Y.Scale,launcherStart.Y.Offset+delta.Y)
+ end
+end)
+launcher.Activated:Connect(function()
+ if moved then moved=false;return end
+ frame.Visible=not frame.Visible
+end)
 local routeOn=false
 local speed=250
 local held=false
@@ -254,10 +311,10 @@ local function doPoint4()
  return true,'home'
 end
 local function render()
- routeBtn.Text=routeOn and 'ROUTE : ON (กดเพื่อหยุด)' or 'ROUTE : OFF (กดเพื่อเริ่ม)'
- routeBtn.BackgroundColor3=routeOn and Color3.fromRGB(29,139,79) or Color3.fromRGB(120,60,60)
- monitorBtn.Text=env.EggMonitorEnabled and 'EGG MONITOR : ON' or 'EGG MONITOR : OFF'
- monitorBtn.BackgroundColor3=env.EggMonitorEnabled and Color3.fromRGB(29,139,79) or Color3.fromRGB(120,60,60)
+ routeBtn.Text=routeOn and 'Cherub Route                       ON  ■' or 'Cherub Route                       OFF  □'
+ routeBtn.BackgroundColor3=routeOn and Color3.fromRGB(33,100,58) or Color3.fromRGB(45,48,52)
+ monitorBtn.Text=env.EggMonitorEnabled and 'Egg Monitor                        ON  ■' or 'Egg Monitor                        OFF  □'
+ monitorBtn.BackgroundColor3=env.EggMonitorEnabled and Color3.fromRGB(33,100,58) or Color3.fromRGB(45,48,52)
  speedLabel.Text='ความเร็วบิน: '..tostring(speed)..' studs/s'
 end
 speedBox.FocusLost:Connect(function()
@@ -302,10 +359,7 @@ routeBtn.Activated:Connect(function()
  end)
 end)
 mini.Activated:Connect(function()
- local collapsed=frame.Size.Y.Offset>50
- frame.Size=UDim2.fromOffset(330,collapsed and 40 or 290)
- for _,o in ipairs({routeBtn,speedLabel,speedBox,monitorBtn,status,hint}) do o.Visible=not collapsed end
- mini.Text=collapsed and '+' or '−'
+ frame.Visible=false
 end)
 local function startEggMonitor()
 -- Ride A Pet | Egg monitor + Telegram + Day/Night
@@ -834,6 +888,7 @@ close.Activated:Connect(function()
  env.EggMonitorEnabled=false
  env.RideEggRun=(env.RideEggRun or 0)+1
  env.CherubComboGen=env.CherubComboGen+1
+ if dragConnection then dragConnection:Disconnect() end
  gui:Destroy()
 end)
 render()
