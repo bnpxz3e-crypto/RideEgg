@@ -3,7 +3,6 @@
 local TOKEN = "8455689997:AAHwzIdo53Eo4v1IdaONYYkUhR8yGylUaCI"
 local CHAT = "1813392489"
 
-
 local Players=game:GetService("Players")
 local RS=game:GetService("ReplicatedStorage")
 local HS=game:GetService("HttpService")
@@ -299,8 +298,11 @@ local function markMissing(record,phase,seconds)
   return
  end
  record.state="other"
- finalize(record,"🥚 ไข่ถูกเก็บแล้ว (ไม่ได้เก็บผ่าน Telegram)")
- send("🥚 ไข่ถูกเก็บแล้ว (ไม่ได้เก็บผ่าน Telegram)\n"..describe(record))
+ local status=(phase=="NIGHT" and seconds and seconds>60)
+  and ("✅ ระบบ Chilli เก็บ "..record.name.." สำเร็จ")
+  or "🥚 ไข่ถูกเก็บแล้ว (ไม่ได้เก็บผ่าน Telegram)"
+ finalize(record,status)
+ send(status)
 end
 local function settleReset()
  for id,record in pairs(pendingReset) do
@@ -389,8 +391,9 @@ local function detectTime()
   for id,record in pairs(pendingReset) do
    if os.clock()-(record.missingAt or 0)>35 then
     record.state="other";pendingReset[id]=nil
-    finalize(record,"🥚 ไข่ถูกเก็บแล้ว (ไม่ได้เก็บผ่าน Telegram)")
-    send("🥚 ไข่ถูกเก็บแล้ว (ไม่ได้เก็บผ่าน Telegram)\n"..describe(record))
+    local status="✅ ระบบ Chilli เก็บ "..record.name.." สำเร็จ"
+    finalize(record,status)
+    send(status)
    end
   end
  end
