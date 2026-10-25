@@ -121,7 +121,7 @@ local monitorHeading=label('⌄  Egg Notifications',250,27,19)
 monitorHeading.TextColor3=Color3.fromRGB(184,217,250)
 local monitorBtn=btn('',12,279,341,38,Color3.fromRGB(22,24,27))
 local updateMonitorSwitch=makeSlideSwitch(monitorBtn,'Egg Monitor')
-local hint=label('Route ใช้ระบบต้นฉบับ • วนซ้ำทุก 5 วิเมื่อจบรอบ',322,24,11)
+local hint=label('จุด 4 ไม่มี E: ตรวจจุด 1 ใหม่ • กลับบ้านเมื่อมี E',322,24,11)
 hint.TextColor3=Color3.fromRGB(165,174,188)
 -- Independent launcher remains visible when the large panel is hidden.
 local launcher=Instance.new('TextButton')
@@ -190,6 +190,8 @@ local start={Activated=routeEvent.Event,Text=''}
 -- status and gui are passed from the shared UI.
 local working=false
 local actionSerial=0
+local routeOutcome='idle' -- idle / running / retry / home / error
+local retryFromPoint1=false
 local held=false
 local cameraLock=false
 local savedCameraType=nil
@@ -340,11 +342,13 @@ start.Activated:Connect(function()
  if working then
   stop(); status.Text='⏹ หยุดแล้ว'; start.Text='🚀 เริ่มทำงาน 1 ปุ่ม'; return
  end
- working=true; actionSerial=actionSerial+1
+ working=true; routeOutcome='running'; actionSerial=actionSerial+1
  local myAction=actionSerial
  start.Text='⏹ หยุดการทำงาน'
  task.spawn(function()
-  for _,point in ipairs(DEST) do
+  for index,point in ipairs(DEST) do
+   -- On a missing E at point 4, revisit points 1-4 without staging or home.
+   if retryFromPoint1 and index==1 then continue end
    if not working or not alive() or myAction~=actionSerial then break end
    local ok,err=fly(point.pos,point.label)
    if not ok then status.Text='⚠️ '..tostring(err);break end
@@ -382,8 +386,28 @@ start.Activated:Connect(function()
    elseif point.label=='จุดที่ 4' then
     status.Text='📷 จุดที่ 4 • กล้องมุมที่บันทึกไว้'
     task.wait(.4)
-    -- เกมอาจใช้ปุ่ม E ที่ไม่ใช่ ProximityPrompt: ยังยืนยันผลไม่ได้
-    local firstOk,firstErr=interact(point)
+    -- Check for an actual nearby E ProximityPrompt BEFORE pressing E.
+    -- If none is available, do not press E and do not fly home.
+    local point4Prompt=nil
+    local checkUntil=os.clock()+2.5
+    while working and alive() and myAction==actionSerial and os.clock()<checkUntil do
+     local root=rootPart()
+     if root then point4Prompt=nearbyPrompt(root) end
+     if point4Prompt then break end
+     task.wait(.3)
+    end
+    if not working or not alive() or myAction~=actionSerial then break end
+    if not point4Prompt then
+     unlockCamera()
+     local ch=player.Character
+     local hum=ch and ch:FindFirstChildOfClass('Humanoid')
+     if hum then pcall(function() hum:UnequipTools() end) end
+     routeOutcome='retry'
+     retryFromPoint1=true
+     status.Text='🔁 จุดที่ 4 ไม่มี E → กลับไปตรวจจุด 1 ใหม่'
+     break
+    end
+    local firstOk,firstErr=interact(point,point4Prompt)
     -- Restore normal camera immediately after first E attempt at point 4.
     unlockCamera()
     if not working or not alive() or myAction~=actionSerial then break end
@@ -395,6 +419,8 @@ start.Activated:Connect(function()
     if not working or not alive() or myAction~=actionSerial then break end
     local secondOk,secondErr=interact(point)
     if not working or not alive() or myAction~=actionSerial then break end
+    routeOutcome='home'
+    retryFromPoint1=false
     if firstOk and secondOk then
      status.Text='✅ จุดที่ 4 • กด E สองรอบแล้ว'
     else
@@ -408,15 +434,16 @@ start.Activated:Connect(function()
    end
   end
   if myAction==actionSerial then
+   if routeOutcome=='running' then routeOutcome='error' end
    releaseE();unlockCamera();working=false
    if gui.Parent then start.Text='🚀 เริ่มทำงาน 1 ปุ่ม' end
   end
  end)
 end)
 
-return function() routeEvent:Fire() end, function() stop() end, function() return working end
+return function() routeEvent:Fire() end, function() stop() end, function() return working end, function() return routeOutcome end
 end
-local routeStart,routeStop,routeWorking=setupOriginalRoute(status,gui)
+local routeStart,routeStop,routeWorking,routeResult=setupOriginalRoute(status,gui)
 local routeOn=false
 local routeSerial=0
 routeBtn.Activated:Connect(function()
@@ -441,9 +468,14 @@ routeBtn.Activated:Connect(function()
    task.wait(.15)
    while routeOn and alive() and serial==routeSerial and routeWorking() do task.wait(.25) end
    if not routeOn or not alive() or serial~=routeSerial then break end
-   -- Keep the original route behavior intact. Stop repeating if it reports an error.
-   local s=status.Text or ''
-   if s:find('⚠️',1,true) then break end
+   local result=routeResult()
+   if result=='retry' then
+    status.Text='🔁 จุดที่ 4 ไม่มี E • เริ่มตรวจจุด 1 ใหม่'
+    task.wait(.5)
+    -- Do not wait at home: the next pass skips staging and begins at point 1.
+    continue
+   end
+   if result~='home' then break end
    for n=5,1,-1 do
     if not routeOn or not alive() or serial~=routeSerial then break end
     status.Text='⏳ เริ่มรอบใหม่ใน '..n..' วินาที'
