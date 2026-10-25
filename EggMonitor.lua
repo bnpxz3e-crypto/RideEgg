@@ -170,16 +170,24 @@ local function releaseCamera()
  if cam and cameraOldType then cam.CameraType=cameraOldType end
  cameraOldType=nil
 end
-local function lockCamera(i)
+-- Aim at the saved camera angle for just one second, then return control.
+local function aimCameraOneSecond(i)
  releaseCamera()
  local cam=workspace.CurrentCamera
- if not cam then return end
+ if not cam or not CAMERA[i] then return end
  cameraOldType=cam.CameraType
  cam.CameraType=Enum.CameraType.Scriptable
  cam.CFrame=CAMERA[i]
  camConn=RunService.RenderStepped:Connect(function()
-  if routeOn and alive() and workspace.CurrentCamera==cam then cam.CFrame=CAMERA[i] end
+  if routeOn and alive() and workspace.CurrentCamera==cam then
+   cam.CFrame=CAMERA[i]
+  end
  end)
+ local deadline=os.clock()+1
+ while routeOn and alive() and os.clock()<deadline do
+  task.wait(.05)
+ end
+ releaseCamera()
 end
 local function waitOn(seconds)
  local t=os.clock()+seconds
@@ -295,7 +303,7 @@ local function doDeposit(i)
  local point=DEST[i+1]
  local ok,err=fly(point.pos,point.label)
  if not ok then return false,err end
- lockCamera(i)
+ aimCameraOneSecond(i)
  ok,err=equipEgg(point.label)
  if not ok then releaseCamera();return false,err end
  status.Text='🔎 '..point.label..' | ถือไข่แล้ว รอ E'
@@ -328,7 +336,7 @@ local function doPoint4()
  local point=DEST[5]
  local ok,err=fly(point.pos,point.label)
  if not ok then return false,err end
- lockCamera(4)
+ aimCameraOneSecond(4)
  status.Text='🔎 จุดที่ 4 | ตรวจ E'
  local found,prompt=waitE(2.5)
  if not routeOn then releaseCamera();return false,'หยุดแล้ว' end
