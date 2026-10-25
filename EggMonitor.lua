@@ -109,6 +109,52 @@ for i,entry in ipairs(eggRows) do
  end)
 end
 local hint=label('เปิดไข่ = แจ้งเตือน + อนุญาตเก็บ  |  ปิด = ข้าม',397,13,10,MUTED)
+-- Responsive viewport layout: keep header visible and scroll controls independently.
+-- The route and monitor logic below are deliberately unchanged.
+local scroll=Instance.new('ScrollingFrame')
+scroll.Name='ScrollableSettings'
+scroll.Position=UDim2.fromOffset(0,46)
+scroll.Size=UDim2.new(1,0,1,-46)
+scroll.BackgroundTransparency=1
+scroll.BorderSizePixel=0
+scroll.ScrollBarThickness=4
+scroll.ScrollBarImageColor3=Color3.fromRGB(105,128,152)
+scroll.ScrollingDirection=Enum.ScrollingDirection.Y
+scroll.CanvasSize=UDim2.fromOffset(0,374)
+scroll.ClipsDescendants=true
+scroll.Parent=frame
+for _,child in ipairs(frame:GetChildren()) do
+ if child~=header and child~=scroll and child:IsA('GuiObject') then
+  local p=child.Position
+  child.Parent=scroll
+  child.Position=UDim2.new(p.X.Scale,p.X.Offset,p.Y.Scale,p.Y.Offset-46)
+ end
+end
+local function fitPanelToScreen()
+ local camera=workspace.CurrentCamera
+ if not camera then return end
+ local viewport=camera.ViewportSize
+ if viewport.X<=0 or viewport.Y<=0 then return end
+ local width=math.min(312,math.max(220,viewport.X-22))
+ local height=math.min(414,math.max(165,viewport.Y-30))
+ local scale=width/312
+ local uiScale=frame:FindFirstChild('CherubResponsiveScale')
+ if not uiScale then
+  uiScale=Instance.new('UIScale')
+  uiScale.Name='CherubResponsiveScale'
+  uiScale.Parent=frame
+ end
+ uiScale.Scale=scale
+ local logicalHeight=math.min(414,math.max(165,(viewport.Y-30)/scale))
+ frame.Size=UDim2.fromOffset(312,logicalHeight)
+ frame.Position=UDim2.new(.5,-156*scale,.5,-logicalHeight*scale/2)
+end
+fitPanelToScreen()
+local viewportConnection=nil
+local cameraForSize=workspace.CurrentCamera
+if cameraForSize then
+ viewportConnection=cameraForSize:GetPropertyChangedSignal('ViewportSize'):Connect(fitPanelToScreen)
+end
 -- Independent launcher remains visible when the large panel is hidden.
 local launcher=Instance.new('TextButton')
 launcher.Name='OpenCherubHub';launcher.Size=UDim2.fromOffset(48,48)
@@ -1020,6 +1066,7 @@ close.Activated:Connect(function()
  env.CherubComboGen=env.CherubComboGen+1
  env.CherubRouteGeneration=(env.CherubRouteGeneration or 0)+1
  if dragConnection then dragConnection:Disconnect() end
+ if viewportConnection then viewportConnection:Disconnect() end
  gui:Destroy()
 end)
 updateRouteSwitch(false)
