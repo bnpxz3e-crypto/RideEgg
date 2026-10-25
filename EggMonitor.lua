@@ -3,6 +3,7 @@
 local TOKEN = "8455689997:AAHwzIdo53Eo4v1IdaONYYkUhR8yGylUaCI"
 local CHAT = "1813392489"
 
+
 local Players=game:GetService("Players")
 local RS=game:GetService("ReplicatedStorage")
 local HS=game:GetService("HttpService")
@@ -348,14 +349,10 @@ local function detectTime()
      task.spawn(function()
       -- Keep checking during the remaining minute; don't silently give up
       -- after one busy/Chilli state check.
-      local lastReason=nil
+      -- AUTO diagnostics stay local; Telegram only gets per-egg start/success.
       local function report(reason)
-       if reason~=lastReason then
-        lastReason=reason
-        task.spawn(send,"🤖 AUTO สำรอง: "..reason)
-       end
+       warn("[Egg AUTO] "..reason)
       end
-      report("เริ่มตรวจไข่ที่เหลือก่อนเช้า")
       while alive() and autoEnabled and env.EggMonitorEnabled do
        local currentPhase,left=readTime()
        if currentPhase~="NIGHT" or not left or left>60 or left<=0 then
@@ -377,7 +374,6 @@ local function detectTime()
          report("ไม่มีไข่เป้าหมายเหลือให้เก็บ")
          return
         end
-        report("พบ "..eggName(target).." กำลังสั่งเก็บสำรอง")
         collectCycle(target.Name,"AUTO")
         return
        end
@@ -401,7 +397,7 @@ local function detectTime()
 end
 
 collectCycle=function(requestId,source)
- if busy then send("⏳ กำลังเก็บไข่รอบก่อนอยู่");return end
+ if busy then return end
  if source=="AUTO" and (not autoEnabled or chilliWorking() or chilliAutoOn()) then return end
  if not env.EggMonitorEnabled then send("🔴 ระบบ Egg Monitor ปิดอยู่");return end
  local chosen=Active:FindFirstChild(requestId)
@@ -409,9 +405,7 @@ collectCycle=function(requestId,source)
  busy=true
  local switched=false
  local function work()
-  send("🥚 กำลังไปเก็บไข่\n"..eggName(chosen))
   local off=toggle5();switched=true
-  send("⏸ สั่งปิด Halloween Event "..off.."/5")
   if off~=5 then error("กดสวิตช์ Event ไม่ครบ 5/5; ตรวจสอบสถานะ Event ก่อนเปิดกลับ") end
   task.wait(1)
   local ids={}
@@ -437,7 +431,7 @@ collectCycle=function(requestId,source)
      if press(card.button) then
       used[id]=true;watching[id]=true;pending[id]=true;pendingSource[id]=source or "TELEGRAM"
       count=count+1
-      send("🥚 สั่ง Collect "..count.."/"..MAX_COLLECT..": "..card.name)
+      send((source=="AUTO" and "🤖 ระบบ AUTO กำลังเริ่มเก็บ " or "🥚 ระบบ Telegram กำลังเริ่มเก็บ ")..card.name)
      end
      break
     end
@@ -463,7 +457,6 @@ collectCycle=function(requestId,source)
   end
   if count>0 and not next(watching) then task.wait(REOPEN_DELAY) end
   local on=toggle5();switched=false
-  send("▶️ สั่งเปิด Halloween Event กลับ "..on.."/5")
  end
  local ok,err=pcall(work)
  if not ok then
