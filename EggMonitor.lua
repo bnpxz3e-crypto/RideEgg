@@ -1,7 +1,317 @@
+-- Ride A Pet | Cherub Route + Egg Monitor (Delta)
+-- Set Telegram config before running, if needed:
+getgenv().CherubTelegramToken = "8455689997:AAHwzIdo53Eo4v1IdaONYYkUhR8yGylUaCI"
+getgenv().CherubTelegramChat = "1813392489"
+
+local Players = game:GetService('Players')
+local RunService = game:GetService('RunService')
+local VIM = game:GetService('VirtualInputManager')
+local UIS = game:GetService('UserInputService')
+local player = Players.LocalPlayer
+local pg = player:WaitForChild('PlayerGui')
+local env = (getgenv and getgenv()) or _G
+env.CherubComboGen = (env.CherubComboGen or 0)+1
+local gen = env.CherubComboGen
+local function alive() return env.CherubComboGen==gen end
+-- Shut down previous instances of route and monitor.
+env.CherubRouteGeneration=(env.CherubRouteGeneration or 0)+1
+env.RideEggRun=(env.RideEggRun or 0)+1
+env.EggMonitorEnabled=false
+local old=pg:FindFirstChild('CherubComboPanel')
+if old then old:Destroy() end
+local DEST={
+ {label='จุดเริ่มต้น',pos=Vector3.new(-484.85,42429.79,907.94)},
+ {label='จุดที่ 1',pos=Vector3.new(-459.16,42430.86,879.43),hold=3,equip=true},
+ {label='จุดที่ 2',pos=Vector3.new(-516.71,42431.29,927.74),hold=3,equip=true},
+ {label='จุดที่ 3',pos=Vector3.new(-539.43,42432.33,848.25),hold=3,equip=true},
+ {label='จุดที่ 4',pos=Vector3.new(-496.58,42430.93,893.82),hold=2},
+ {label='บ้าน',pos=Vector3.new(174.74,40316.42,1061.15)}
+}
+local CAMERA={
+ [1]=CFrame.new(-471.368866,42436.234375,907.315430)*CFrame.fromOrientation(-0.16520408,-0.11923753,0),
+ [2]=CFrame.new(-490.110229,42437.496094,922.611450)*CFrame.fromOrientation(-0.19392118,1.49393189,0),
+ [3]=CFrame.new(-519.581116,42439.113281,866.312988)*CFrame.fromOrientation(-0.20994413,0.72658545,0),
+ [4]=CFrame.new(-481.348175,42436.113281,918.115417)*CFrame.fromOrientation(-0.15176621,0.58706641,0)
+}
+local gui=Instance.new('ScreenGui')
+gui.Name='CherubComboPanel';gui.ResetOnSpawn=false;gui.DisplayOrder=995;gui.Parent=pg
+local function corner(o,r) Instance.new('UICorner',o).CornerRadius=UDim.new(0,r or 9) end
+local frame=Instance.new('Frame')
+frame.Size=UDim2.fromOffset(330,290);frame.Position=UDim2.new(.5,-165,.3,0)
+frame.BackgroundColor3=Color3.fromRGB(22,28,40);frame.Active=true;frame.Draggable=true;frame.Parent=gui
+corner(frame,12)
+local function label(text,y,h,size)
+ local v=Instance.new('TextLabel');v.Size=UDim2.new(1,-20,0,h);v.Position=UDim2.fromOffset(10,y)
+ v.BackgroundTransparency=1;v.Text=text;v.TextSize=size or 15;v.TextColor3=Color3.fromRGB(218,232,255)
+ v.Font=Enum.Font.Gotham;v.TextWrapped=true;v.Parent=frame;return v
+end
+local title=label('👼 Cherub Route + Egg Monitor',5,30,18)
+title.Font=Enum.Font.GothamBold
+local function btn(txt,x,y,w,h,color)
+ local b=Instance.new('TextButton');b.Text=txt;b.Size=UDim2.fromOffset(w,h);b.Position=UDim2.fromOffset(x,y)
+ b.BackgroundColor3=color;b.TextColor3=Color3.new(1,1,1);b.Font=Enum.Font.GothamBold;b.TextSize=15;b.Parent=frame;corner(b,8);return b
+end
+local close=btn('X',290,4,35,32,Color3.fromRGB(204,65,57))
+local mini=btn('−',251,4,35,32,Color3.fromRGB(72,85,110))
+local routeBtn=btn('ROUTE : OFF',10,45,310,44,Color3.fromRGB(120,60,60))
+local speedLabel=label('ความเร็วบิน: 250 studs/s',95,24,15)
+local speedBox=Instance.new('TextBox')
+speedBox.Size=UDim2.fromOffset(105,32);speedBox.Position=UDim2.fromOffset(210,93)
+speedBox.Text='250';speedBox.PlaceholderText='100-1000';speedBox.TextSize=17;speedBox.ClearTextOnFocus=false
+speedBox.TextColor3=Color3.new(1,1,1);speedBox.BackgroundColor3=Color3.fromRGB(53,66,87);speedBox.Parent=frame;corner(speedBox,7)
+local monitorBtn=btn('EGG MONITOR : OFF',10,135,310,44,Color3.fromRGB(120,60,60))
+local status=label('พร้อมใช้งาน • ปิด Chilli Auto Collect ก่อนเปิด Route',184,80,14)
+status.TextYAlignment=Enum.TextYAlignment.Top
+local hint=label('Route วนซ้ำ | กลับบ้านรอ 5 วิ | E จุด 4 ไม่ขึ้น → เริ่มใหม่',265,19,11)
+local routeOn=false
+local speed=250
+local held=false
+local camConn=nil
+local cameraOldType=nil
+local monitorStarted=false
+local function releaseE()
+ if held then pcall(function() VIM:SendKeyEvent(false,Enum.KeyCode.E,false,game) end);held=false end
+end
+local function releaseCamera()
+ if camConn then camConn:Disconnect();camConn=nil end
+ local cam=workspace.CurrentCamera
+ if cam and cameraOldType then cam.CameraType=cameraOldType end
+ cameraOldType=nil
+end
+local function lockCamera(i)
+ releaseCamera()
+ local cam=workspace.CurrentCamera
+ if not cam then return end
+ cameraOldType=cam.CameraType
+ cam.CameraType=Enum.CameraType.Scriptable
+ cam.CFrame=CAMERA[i]
+ camConn=RunService.RenderStepped:Connect(function()
+  if routeOn and alive() and workspace.CurrentCamera==cam then cam.CFrame=CAMERA[i] end
+ end)
+end
+local function waitOn(seconds)
+ local t=os.clock()+seconds
+ while routeOn and alive() and os.clock()<t do task.wait(.1) end
+ return routeOn and alive()
+end
+local function rootPart()
+ local c=player.Character
+ return c and c:FindFirstChild('HumanoidRootPart')
+end
+local function fly(pos,name)
+ local root=rootPart()
+ if not root then return false,'ไม่พบ HumanoidRootPart' end
+ local stalled,last=0,math.huge
+ local deadline=os.clock()+math.max(20,(root.Position-pos).Magnitude/math.max(speed,1)*5+15)
+ while routeOn and alive() do
+  local dt=RunService.Heartbeat:Wait()
+  if not root.Parent then return false,'ตัวละครหายไป' end
+  local delta=pos-root.Position;local d=delta.Magnitude
+  if d<=4 then return true end
+  if os.clock()>deadline then return false,'บินเกินเวลาที่กำหนด' end
+  local step=math.min(speed*math.min(dt,.12),d)
+  root.AssemblyLinearVelocity=Vector3.zero
+  root.CFrame=CFrame.new(root.Position+delta.Unit*step)
+  if d>=last-.15 then stalled=stalled+dt else stalled=0 end
+  last=d
+  status.Text=string.format('🚀 %s | เหลือ %.0f studs',name,d)
+  if stalled>4 then return false,'ติดขัดหรือถูกดึงตำแหน่งกลับ' end
+ end
+ return false,'หยุดแล้ว'
+end
+local function equipEgg(labelText)
+ local c=player.Character;local hum=c and c:FindFirstChildOfClass('Humanoid')
+ local bp=player:FindFirstChildOfClass('Backpack')
+ if not hum or not bp then return false,'ไม่พบตัวละครหรือกระเป๋า' end
+ for _,t in ipairs(c:GetChildren()) do
+  if t:IsA('Tool') and t.Name=='Cherub Egg' then return true end
+ end
+ for _,t in ipairs(bp:GetChildren()) do
+  if t:IsA('Tool') and t.Name=='Cherub Egg' then
+   status.Text='🥚 '..labelText..' | หยิบ Cherub Egg'
+   hum:EquipTool(t)
+   for _=1,15 do
+    if t.Parent==c then return true end
+    if not waitOn(.1) then return false,'หยุดแล้ว' end
+   end
+   return false,'หยิบไข่ไม่สำเร็จ'
+  end
+ end
+ return false,'ไม่มี Cherub Egg ใน Backpack'
+end
+local function unequip()
+ local c=player.Character;local hum=c and c:FindFirstChildOfClass('Humanoid')
+ if hum then pcall(function() hum:UnequipTools() end) end
+end
+-- A few games render E as GUI rather than a ProximityPrompt.
+local function visible(v)
+ local p=v
+ while p and p~=pg do
+  if p:IsA('GuiObject') and not p.Visible then return false end
+  p=p.Parent
+ end
+ return true
+end
+local function findGuiE()
+ local checked=0
+ for _,v in ipairs(pg:GetDescendants()) do
+  checked=checked+1
+  if checked>12000 then break end
+  if v:IsA('TextLabel') or v:IsA('TextButton') then
+   local t=(v.Text or ''):gsub('%s+',''):upper()
+   if t=='E' and not v:IsDescendantOf(gui) and visible(v) then return v end
+  end
+ end
+ return nil
+end
+local function findPrompt()
+ local root=rootPart();if not root then return nil end
+ local count=0;local nearest,best=nil,math.huge
+ for _,obj in ipairs(workspace:GetDescendants()) do
+  count=count+1;if count>15000 then break end
+  if obj:IsA('ProximityPrompt') and obj.Enabled then
+   local p=obj.Parent
+   local position=p and (p:IsA('BasePart') and p.Position or p:IsA('Attachment') and p.WorldPosition)
+   if position then
+    local d=(position-root.Position).Magnitude
+    if d<best and d<=math.max(14,obj.MaxActivationDistance+3) then nearest=obj;best=d end
+   end
+  end
+ end
+ return nearest
+end
+local function waitE(seconds)
+ local deadline=os.clock()+seconds
+ while routeOn and alive() and os.clock()<deadline do
+  local prompt=findPrompt()
+  if prompt then return true,prompt end
+  if findGuiE() then return true,nil end
+  if not waitOn(.25) then break end
+ end
+ return false,nil
+end
+local function pressE(hold,prompt)
+ if not routeOn or not alive() then return false end
+ -- Send a real E key hold; GUI-only interactions may depend on camera angle.
+ local ok=pcall(function() VIM:SendKeyEvent(true,Enum.KeyCode.E,false,game);held=true end)
+ if not ok then return false end
+ local completed=waitOn(hold)
+ releaseE()
+ return completed
+end
+local function doDeposit(i)
+ local point=DEST[i+1]
+ local ok,err=fly(point.pos,point.label)
+ if not ok then return false,err end
+ lockCamera(i)
+ ok,err=equipEgg(point.label)
+ if not ok then releaseCamera();return false,err end
+ status.Text='🔎 '..point.label..' | ถือไข่แล้ว รอ E'
+ local found,prompt=waitE(2.5)
+ if not routeOn then return false,'หยุดแล้ว' end
+ if not found then
+  unequip();releaseCamera();status.Text='⏭ '..point.label..' | ไม่มี E ข้ามจุด'
+  waitOn(.4)
+  return true
+ end
+ status.Text='🖐 '..point.label..' | กด E เพื่อวาง'
+ ok=pressE(point.hold,prompt)
+ releaseCamera()
+ if not ok then return false,'กด E ไม่สำเร็จ' end
+ status.Text='✅ '..point.label..' | กด E แล้ว (ยังไม่ยืนยันการวาง)'
+ waitOn(.5)
+ return true
+end
+local function doPoint4()
+ local point=DEST[5]
+ local ok,err=fly(point.pos,point.label)
+ if not ok then return false,err end
+ lockCamera(4)
+ status.Text='🔎 จุดที่ 4 | ตรวจ E'
+ local found,prompt=waitE(2.5)
+ if not routeOn then releaseCamera();return false,'หยุดแล้ว' end
+ if not found then
+  releaseCamera();status.Text='⏭ จุดที่ 4 ไม่มี E → เริ่มจุด 1 ใหม่'
+  waitOn(.6)
+  return true,'restart'
+ end
+ status.Text='🖐 จุดที่ 4 | กด E รอบแรก'
+ ok=pressE(2,prompt)
+ -- Release camera immediately after the FIRST E, as requested.
+ releaseCamera()
+ if not ok then return false,'กด E รอบแรกไม่สำเร็จ' end
+ for i=5,1,-1 do
+  status.Text='⏳ จุดที่ 4 | รอ '..i..' วิ ก่อนกดรอบสอง'
+  if not waitOn(1) then return false,'หยุดแล้ว' end
+ end
+ status.Text='🖐 จุดที่ 4 | กด E รอบสอง'
+ local found2,prompt2=waitE(2)
+ if found2 then
+  if not pressE(2,prompt2) then return false,'กด E รอบสองไม่สำเร็จ' end
+ else
+  status.Text='⚠️ จุดที่ 4 | ไม่พบ E รอบสอง (จะกลับบ้าน)'
+ end
+ return true,'home'
+end
+local function render()
+ routeBtn.Text=routeOn and 'ROUTE : ON (กดเพื่อหยุด)' or 'ROUTE : OFF (กดเพื่อเริ่ม)'
+ routeBtn.BackgroundColor3=routeOn and Color3.fromRGB(29,139,79) or Color3.fromRGB(120,60,60)
+ monitorBtn.Text=env.EggMonitorEnabled and 'EGG MONITOR : ON' or 'EGG MONITOR : OFF'
+ monitorBtn.BackgroundColor3=env.EggMonitorEnabled and Color3.fromRGB(29,139,79) or Color3.fromRGB(120,60,60)
+ speedLabel.Text='ความเร็วบิน: '..tostring(speed)..' studs/s'
+end
+speedBox.FocusLost:Connect(function()
+ local v=tonumber(speedBox.Text)
+ if v then speed=math.clamp(math.floor(v),50,1000) end
+ speedBox.Text=tostring(speed);render()
+end)
+local function stopRoute()
+ routeOn=false;releaseE();releaseCamera();render()
+end
+routeBtn.Activated:Connect(function()
+ if routeOn then stopRoute();status.Text='⏹ Route หยุดแล้ว';return end
+ routeOn=true;render()
+ task.spawn(function()
+  local lap=0
+  while routeOn and alive() do
+   lap=lap+1
+   status.Text='🔁 เริ่มรอบ '..lap
+   local ok,err=fly(DEST[1].pos,DEST[1].label)
+   if not ok then status.Text='⚠️ '..tostring(err);break end
+   for i=1,3 do
+    if not routeOn then break end
+    ok,err=doDeposit(i)
+    if not ok then break end
+   end
+   if not ok or not routeOn then status.Text='⚠️ '..tostring(err);break end
+   local outcome
+   ok,outcome=doPoint4()
+   if not ok then status.Text='⚠️ '..tostring(outcome);break end
+   if outcome=='restart' then
+    -- No E at point 4: begin at staging point again without going home.
+   else
+    ok,err=fly(DEST[6].pos,DEST[6].label)
+    if not ok then status.Text='⚠️ '..tostring(err);break end
+    for n=5,1,-1 do
+     status.Text='🏠 ถึงบ้าน | เริ่มรอบใหม่ใน '..n..' วิ'
+     if not waitOn(1) then break end
+    end
+   end
+  end
+  stopRoute()
+ end)
+end)
+mini.Activated:Connect(function()
+ local collapsed=frame.Size.Y.Offset>50
+ frame.Size=UDim2.fromOffset(330,collapsed and 40 or 290)
+ for _,o in ipairs({routeBtn,speedLabel,speedBox,monitorBtn,status,hint}) do o.Visible=not collapsed end
+ mini.Text=collapsed and '+' or '−'
+end)
+local function startEggMonitor()
 -- Ride A Pet | Egg monitor + Telegram + Day/Night
 -- Fill in a NEW Telegram bot token. Do not share it publicly.
-local TOKEN = "8455689997:AAHwzIdo53Eo4v1IdaONYYkUhR8yGylUaCI"
-local CHAT = "1813392489"
+local TOKEN = env.CherubTelegramToken or "PUT_NEW_BOT_TOKEN_HERE"
+local CHAT = tostring(env.CherubTelegramChat or "PUT_CHAT_ID_HERE")
 
 local Players=game:GetService("Players")
 local RS=game:GetService("ReplicatedStorage")
@@ -31,7 +341,7 @@ local DAY_ID="94969857695475"
 local NIGHT_ID="106891725078200"
 
 local function api(method,data)
- if not req or TOKEN=="PUT_NEW_BOT_TOKEN_HERE" then return nil end
+ if not req or TOKEN=="PUT_NEW_BOT_TOKEN_HERE" or CHAT=="PUT_CHAT_ID_HERE" then return nil end
  local ok,res=pcall(function()
   return req({Url="https://api.telegram.org/bot"..TOKEN.."/"..method,Method="POST",Headers={["Content-Type"]="application/json"},Body=HS:JSONEncode(data)})
  end)
@@ -135,52 +445,6 @@ local function readTime()
  local phase=id==DAY_ID and "DAY" or (id==NIGHT_ID and "NIGHT" or nil)
  return phase,m*60+s
 end
-
--- Small draggable egg ON/OFF button
-for _,name in ipairs({"EggMonitorMini","DayNightLiveTest","DayNightTestV12"}) do
- local old=PG:FindFirstChild(name)
- if old then old:Destroy() end
-end
-local gui=Instance.new("ScreenGui")
-gui.Name="EggMonitorMini";gui.ResetOnSpawn=false;gui.DisplayOrder=999;gui.Parent=PG
-local button=Instance.new("TextButton")
-button.Size=UDim2.fromOffset(68,68)
-button.Position=UDim2.new(.08,0,.3,0)
-button.BackgroundColor3=Color3.fromRGB(30,38,54)
-button.Text="🥚";button.TextSize=36;button.Parent=gui
-Instance.new("UICorner",button).CornerRadius=UDim.new(1,0)
-local stroke=Instance.new("UIStroke",button)
-stroke.Thickness=3
-local dot=Instance.new("Frame")
-dot.Size=UDim2.fromOffset(13,13);dot.Position=UDim2.new(1,-15,1,-15);dot.Parent=button
-Instance.new("UICorner",dot).CornerRadius=UDim.new(1,0)
-local function render()
- local color=env.EggMonitorEnabled and Color3.fromRGB(50,215,110) or Color3.fromRGB(240,65,65)
- stroke.Color=color;dot.BackgroundColor3=color
-end
-render()
-local dragging,dragStart,startPos,moved=false,nil,nil,false
-button.InputBegan:Connect(function(input)
- if input.UserInputType==Enum.UserInputType.Touch or input.UserInputType==Enum.UserInputType.MouseButton1 then
-  dragging=true;dragStart=input.Position;startPos=button.Position;moved=false
- end
-end)
-button.InputEnded:Connect(function(input)
- if input.UserInputType==Enum.UserInputType.Touch or input.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end
-end)
-local dragConnection=UIS.InputChanged:Connect(function(input)
- if dragging and (input.UserInputType==Enum.UserInputType.Touch or input.UserInputType==Enum.UserInputType.MouseMovement) and dragStart then
-  local delta=input.Position-dragStart
-  if delta.Magnitude>8 then moved=true end
-  button.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+delta.X,startPos.Y.Scale,startPos.Y.Offset+delta.Y)
- end
-end)
-button.Activated:Connect(function()
- if moved then moved=false;return end
- env.EggMonitorEnabled=not env.EggMonitorEnabled
- render()
- task.spawn(send,env.EggMonitorEnabled and "🟢 เปิดระบบ Egg Monitor แล้ว" or "🔴 ปิดระบบ Egg Monitor แล้ว")
-end)
 
 -- Each active egg has its own lifecycle; do not mistake a reset for collection.
 -- Preserve message IDs when rerunning this version in the same Roblox session.
@@ -551,10 +815,25 @@ task.spawn(function()
  end
 end)
 
--- Periodic spawn-age edits removed.
 
-task.spawn(function()
- while alive() do task.wait(1) end
- if dragConnection then dragConnection:Disconnect() end
- if gui.Parent then gui:Destroy() end
+end
+monitorBtn.Activated:Connect(function()
+ if env.EggMonitorEnabled then
+  env.EggMonitorEnabled=false
+  env.RideEggRun=(env.RideEggRun or 0)+1
+  status.Text='🔴 Egg Monitor ปิดแล้ว'
+ else
+  env.EggMonitorEnabled=true
+  status.Text='🟢 เริ่ม Egg Monitor / Telegram'
+  task.spawn(startEggMonitor)
+ end
+ render()
 end)
+close.Activated:Connect(function()
+ stopRoute()
+ env.EggMonitorEnabled=false
+ env.RideEggRun=(env.RideEggRun or 0)+1
+ env.CherubComboGen=env.CherubComboGen+1
+ gui:Destroy()
+end)
+render()
