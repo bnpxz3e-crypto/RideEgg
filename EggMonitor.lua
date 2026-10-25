@@ -31,104 +31,90 @@ local CAMERA={
  [3]=CFrame.new(-519.581116,42439.113281,866.312988)*CFrame.fromOrientation(-0.20994413,0.72658545,0),
  [4]=CFrame.new(-481.348175,42436.113281,918.115417)*CFrame.fromOrientation(-0.15176621,0.58706641,0)
 }
--- Chilli-inspired compact panel; all controls belong to our own GUI.
+-- Compact professional dark panel, independent route and per-egg switches.
+local eggPrefs=env.CherubEggPrefs or {['Volcanic Egg']=true,['Solaris Egg']=true,['Cherub Egg']=true}
+env.CherubEggPrefs=eggPrefs
 local gui=Instance.new('ScreenGui')
 gui.Name='CherubComboPanel';gui.ResetOnSpawn=false;gui.DisplayOrder=995;gui.Parent=pg
-local function corner(o,r) Instance.new('UICorner',o).CornerRadius=UDim.new(0,r or 3) end
+local function corner(o,r) Instance.new('UICorner',o).CornerRadius=UDim.new(0,r or 9) end
+local function stroke(o,c,t) local x=Instance.new('UIStroke',o);x.Color=c;x.Thickness=t or 1;return x end
+local BG=Color3.fromRGB(12,17,25)
+local PANEL=Color3.fromRGB(21,29,40)
+local ACCENT=Color3.fromRGB(250,91,68)
+local MUTED=Color3.fromRGB(145,161,181)
+local WHITE=Color3.fromRGB(235,242,250)
 local frame=Instance.new('Frame')
-frame.Name='MainPanel'
-frame.Size=UDim2.fromOffset(365,350)
-frame.Position=UDim2.new(.5,-182,.25,0)
-frame.BackgroundColor3=Color3.fromRGB(13,17,21)
-frame.BorderSizePixel=0;frame.Active=true;frame.Draggable=true;frame.Parent=gui
-local border=Instance.new('UIStroke',frame)
-border.Color=Color3.fromRGB(65,67,69);border.Thickness=2
+frame.Name='MainPanel';frame.Size=UDim2.fromOffset(312,414)
+frame.Position=UDim2.new(.5,-156,.5,-207)
+frame.BackgroundColor3=BG;frame.BorderSizePixel=0;frame.Active=true;frame.Draggable=true;frame.Parent=gui
+corner(frame,13);stroke(frame,Color3.fromRGB(65,78,95))
 local header=Instance.new('Frame')
-header.Size=UDim2.new(1,0,0,45);header.BackgroundColor3=Color3.fromRGB(218,42,29)
-header.BorderSizePixel=0;header.Parent=frame
-local hgrad=Instance.new('UIGradient',header)
-hgrad.Color=ColorSequence.new(Color3.fromRGB(255,84,63),Color3.fromRGB(166,13,11))
-hgrad.Rotation=90
+header.Size=UDim2.new(1,0,0,46);header.BackgroundColor3=Color3.fromRGB(35,43,57)
+header.BorderSizePixel=0;header.Parent=frame;corner(header,12)
+local accent=Instance.new('Frame');accent.Size=UDim2.new(1,0,0,3);accent.BackgroundColor3=ACCENT;accent.BorderSizePixel=0;accent.Parent=header
 local title=Instance.new('TextLabel')
-title.Size=UDim2.new(1,-105,1,0);title.Position=UDim2.fromOffset(14,0)
-title.BackgroundTransparency=1;title.Text='👼 Cherub Hub';title.TextColor3=Color3.new(1,1,1)
-title.TextStrokeTransparency=.25;title.Font=Enum.Font.GothamBlack;title.TextSize=22
+title.Size=UDim2.new(1,-98,1,0);title.Position=UDim2.fromOffset(13,0);title.BackgroundTransparency=1
+title.Text='👼  CHERUB HUB';title.Font=Enum.Font.GothamBold;title.TextSize=17;title.TextColor3=WHITE
 title.TextXAlignment=Enum.TextXAlignment.Left;title.Parent=header
 local function btn(txt,x,y,w,h,color,parent)
- local b=Instance.new('TextButton');b.Text=txt;b.Size=UDim2.fromOffset(w,h);b.Position=UDim2.fromOffset(x,y)
- b.BackgroundColor3=color;b.BorderSizePixel=0;b.TextColor3=Color3.new(1,1,1)
- b.Font=Enum.Font.GothamBold;b.TextSize=15;b.Parent=parent or frame
- local stroke=Instance.new('UIStroke',b);stroke.Thickness=1.5;stroke.Color=Color3.fromRGB(80,85,92)
- return b
+ local v=Instance.new('TextButton');v.Text=txt;v.Size=UDim2.fromOffset(w,h);v.Position=UDim2.fromOffset(x,y)
+ v.BackgroundColor3=color;v.BorderSizePixel=0;v.TextColor3=WHITE;v.Font=Enum.Font.GothamBold;v.TextSize=15
+ v.Parent=parent or frame;corner(v,7);return v
 end
-local close=btn('X',324,6,34,32,Color3.fromRGB(178,39,30),header)
-local mini=btn('−',285,6,34,32,Color3.fromRGB(62,67,73),header)
-local function label(text,y,h,size)
- local v=Instance.new('TextLabel');v.Size=UDim2.new(1,-24,0,h);v.Position=UDim2.fromOffset(12,y)
- v.BackgroundTransparency=1;v.Text=text;v.TextSize=size or 15;v.TextColor3=Color3.fromRGB(232,238,246)
- v.Font=Enum.Font.GothamBold;v.TextWrapped=true;v.TextXAlignment=Enum.TextXAlignment.Left
- v.Parent=frame;return v
+local mini=btn('−',239,8,30,29,Color3.fromRGB(68,80,97),header)
+local close=btn('×',275,8,30,29,Color3.fromRGB(156,55,58),header)
+local function label(txt,y,h,sz,col)
+ local v=Instance.new('TextLabel');v.Position=UDim2.fromOffset(13,y);v.Size=UDim2.new(1,-26,0,h)
+ v.BackgroundTransparency=1;v.Text=txt;v.TextColor3=col or WHITE;v.TextSize=sz or 13
+ v.Font=Enum.Font.GothamMedium;v.TextXAlignment=Enum.TextXAlignment.Left;v.TextWrapped=true;v.Parent=frame
+ return v
 end
-local section=label('⌄  Farm Status',51,28,19)
-section.TextColor3=Color3.fromRGB(184,217,250)
-local status=label('พร้อมใช้งาน • ปิด Chilli Auto Collect ก่อนเปิด Route',85,49,14)
-status.TextYAlignment=Enum.TextYAlignment.Center
-status.BackgroundTransparency=.3;status.BackgroundColor3=Color3.fromRGB(26,31,35)
-local routeHeading=label('⌄  Cherub Egg Route',139,28,19)
-routeHeading.TextColor3=Color3.fromRGB(184,217,250)
-local routeBtn=btn('',12,170,341,38,Color3.fromRGB(22,24,27))
-local function makeSlideSwitch(row, caption)
- row.Text=''
- local name=Instance.new('TextLabel')
- name.BackgroundTransparency=1;name.Position=UDim2.fromOffset(12,0)
- name.Size=UDim2.new(1,-91,1,0);name.Text=caption
- name.TextColor3=Color3.new(1,1,1);name.TextStrokeTransparency=.25
- name.Font=Enum.Font.GothamBold;name.TextSize=16
- name.TextXAlignment=Enum.TextXAlignment.Left;name.Parent=row
- local track=Instance.new('Frame')
- track.Name='SwitchTrack';track.Size=UDim2.fromOffset(62,27)
- track.Position=UDim2.new(1,-68,.5,-13)
- track.BackgroundColor3=Color3.fromRGB(28,29,29)
- track.BorderSizePixel=0;track.Parent=row
- local outline=Instance.new('UIStroke',track)
- outline.Color=Color3.fromRGB(0,0,0);outline.Thickness=2
- local knob=Instance.new('Frame')
- knob.Name='Knob';knob.Size=UDim2.fromOffset(22,21)
- knob.Position=UDim2.fromOffset(3,3)
- knob.BackgroundColor3=Color3.fromRGB(245,245,245)
- knob.BorderSizePixel=0;knob.Parent=track
- local edge=Instance.new('UIStroke',knob)
- edge.Color=Color3.fromRGB(8,8,8);edge.Thickness=1.5
+label('FARM STATUS',57,16,11,MUTED)
+local status=label('พร้อมใช้งาน • เปิดแต่ละระบบแยกกันได้',78,44,12,WHITE)
+status.BackgroundTransparency=0;status.BackgroundColor3=PANEL;corner(status,8)
+local function switchRow(caption,y,initial)
+ local row=btn('',13,y,286,38,PANEL)
+ local name=Instance.new('TextLabel');name.Position=UDim2.fromOffset(11,0);name.Size=UDim2.new(1,-72,1,0)
+ name.BackgroundTransparency=1;name.Text=caption;name.TextColor3=WHITE;name.Font=Enum.Font.GothamMedium
+ name.TextSize=13;name.TextXAlignment=Enum.TextXAlignment.Left;name.Parent=row
+ local track=Instance.new('Frame');track.Size=UDim2.fromOffset(43,23);track.Position=UDim2.new(1,-51,.5,-11)
+ track.BorderSizePixel=0;track.Parent=row;corner(track,12)
+ local knob=Instance.new('Frame');knob.Size=UDim2.fromOffset(17,17);knob.BorderSizePixel=0;knob.Parent=track;corner(knob,9)
  local function update(on)
-  TweenService:Create(track,TweenInfo.new(.18,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{
-   BackgroundColor3=on and Color3.fromRGB(16,182,39) or Color3.fromRGB(28,29,29)
-  }):Play()
-  TweenService:Create(knob,TweenInfo.new(.18,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{
-   Position=on and UDim2.fromOffset(37,3) or UDim2.fromOffset(3,3)
-  }):Play()
+  track.BackgroundColor3=on and Color3.fromRGB(27,165,109) or Color3.fromRGB(76,86,101)
+  knob.BackgroundColor3=Color3.fromRGB(245,249,252)
+  knob.Position=on and UDim2.fromOffset(23,3) or UDim2.fromOffset(3,3)
  end
- return update
+ update(initial)
+ return row,update
 end
-local updateRouteSwitch=makeSlideSwitch(routeBtn,'Cherub Egg Route')
-local speedLabel=label('ความเร็วบิน (studs/s)',214,26,14)
-local speedBox=Instance.new('TextBox')
-speedBox.Size=UDim2.fromOffset(100,30);speedBox.Position=UDim2.fromOffset(250,212)
-speedBox.Text='250';speedBox.PlaceholderText='50-1000';speedBox.TextSize=17;speedBox.ClearTextOnFocus=false
-speedBox.TextColor3=Color3.new(1,1,1);speedBox.BackgroundColor3=Color3.fromRGB(49,55,62)
-speedBox.Parent=frame
-local speedStroke=Instance.new('UIStroke',speedBox);speedStroke.Color=Color3.fromRGB(100,110,120)
-local monitorHeading=label('⌄  Egg Notifications',250,27,19)
-monitorHeading.TextColor3=Color3.fromRGB(184,217,250)
-local monitorBtn=btn('',12,279,341,38,Color3.fromRGB(22,24,27))
-local updateMonitorSwitch=makeSlideSwitch(monitorBtn,'Egg Monitor')
-local hint=label('จุด 4 ไม่มี E: ตรวจจุด 1 ใหม่ • กลับบ้านเมื่อมี E',322,24,11)
-hint.TextColor3=Color3.fromRGB(165,174,188)
+label('AUTOMATION',130,17,11,MUTED)
+local routeBtn,updateRouteSwitch=switchRow('Cherub Egg Route',150,false)
+local speedLabel=label('ความเร็ว Route',194,26,12,MUTED)
+local speedBox=Instance.new('TextBox');speedBox.Position=UDim2.fromOffset(233,195);speedBox.Size=UDim2.fromOffset(66,27)
+speedBox.Text='250';speedBox.ClearTextOnFocus=false;speedBox.TextSize=14;speedBox.Font=Enum.Font.GothamBold
+speedBox.TextColor3=WHITE;speedBox.BackgroundColor3=PANEL;speedBox.Parent=frame;corner(speedBox,6)
+label('EGG NOTIFICATIONS & COLLECTION',233,18,11,MUTED)
+local monitorBtn,updateMonitorSwitch=switchRow('Egg Monitor (หลัก)',253,false)
+local eggSwitchUpdates={}
+local eggRows={{'Volcanic Egg','🌋 Volcanic Egg'},{'Solaris Egg','☀️ Solaris Egg'},{'Cherub Egg','👼 Cherub Egg'}}
+for i,entry in ipairs(eggRows) do
+ local eggName,caption=entry[1],entry[2]
+ local row,update=switchRow(caption,295+(i-1)*33,eggPrefs[eggName]~=false)
+ row.Size=UDim2.fromOffset(286,29)
+ eggSwitchUpdates[eggName]=update
+ row.Activated:Connect(function()
+  eggPrefs[eggName]=not (eggPrefs[eggName]~=false)
+  update(eggPrefs[eggName])
+ end)
+end
+local hint=label('เปิดไข่ = แจ้งเตือน + อนุญาตเก็บ  |  ปิด = ข้าม',397,13,10,MUTED)
 -- Independent launcher remains visible when the large panel is hidden.
 local launcher=Instance.new('TextButton')
-launcher.Name='OpenCherubHub';launcher.Size=UDim2.fromOffset(68,68)
+launcher.Name='OpenCherubHub';launcher.Size=UDim2.fromOffset(48,48)
 launcher.Position=UDim2.new(.08,0,.28,0)
 launcher.BackgroundColor3=Color3.fromRGB(24,36,51)
-launcher.Text='👼';launcher.TextSize=36;launcher.TextColor3=Color3.new(1,1,1)
+launcher.Text='👼';launcher.TextSize=26;launcher.TextColor3=Color3.new(1,1,1)
 launcher.BorderSizePixel=0;launcher.Active=true;launcher.Parent=gui
 Instance.new('UICorner',launcher).CornerRadius=UDim.new(1,0)
 local ls=Instance.new('UIStroke',launcher);ls.Thickness=3;ls.Color=Color3.fromRGB(69,173,246)
@@ -522,6 +508,9 @@ local EGGS={
  ["Solaris Egg"]={icon="☀️",asset="131016816558781"},
  ["Cherub Egg"]={icon="👼",asset="78949206711037"}
 }
+local function eggAllowed(name)
+ return EGGS[name]~=nil and eggPrefs[name]~=false
+end
 local SWITCHES={"Auto Collect Candy","Auto Search Pumpkins","Auto Trick Or Treat","Auto Halloween Ritual","Collect Rare Eggs First"}
 local MAX_COLLECT=2
 local COLLECT_TIMEOUT=300
@@ -712,7 +701,7 @@ local function eggName(e) return e:GetAttribute("Egg") end
 local function describe(r) return (EGGS[r.name] and EGGS[r.name].icon or "🥚").." "..r.name end
 local function announce(e,record)
  task.wait(2)
- if not alive() or not env.EggMonitorEnabled or not e.Parent or record.state~="active" then return end
+ if not alive() or not env.EggMonitorEnabled or not eggAllowed(record.name) or not e.Parent or record.state~="active" then return end
  local item=EGGS[record.name]
  record.weight=weightOf(record.name)
  local keyboard={inline_keyboard={{{text="🥚 เก็บไข่",callback_data="C"..record.id}}}}
@@ -792,7 +781,7 @@ local function detectTime()
  if env.EggMonitorEnabled and seconds<=60 and not warned[phase] then
   local hasEgg=false
   for id,record in pairs(tracked) do
-   if record.state=="active" and Active:FindFirstChild(id) then hasEgg=true;break end
+   if record.state=="active" and eggAllowed(record.name) and Active:FindFirstChild(id) then hasEgg=true;break end
   end
   if hasEgg then
    warned[phase]=true
@@ -823,7 +812,7 @@ local function detectTime()
        else
         local target=nil
         for _,e in ipairs(Active:GetChildren()) do
-         if EGGS[eggName(e)] then target=e;break end
+         if eggAllowed(eggName(e)) then target=e;break end
         end
         if not target then
          report("ไม่มีไข่เป้าหมายเหลือให้เก็บ")
@@ -857,7 +846,7 @@ collectCycle=function(requestId,source)
  if source=="AUTO" and (not autoEnabled or chilliWorking() or chilliAutoOn()) then return end
  if not env.EggMonitorEnabled then send("🔴 ระบบ Egg Monitor ปิดอยู่");return end
  local chosen=Active:FindFirstChild(requestId)
- if not chosen or not EGGS[eggName(chosen)] then send("⚠️ ไข่จากปุ่มนี้หายไปแล้ว");return end
+ if not chosen or not eggAllowed(eggName(chosen)) then send("⚠️ ไข่จากปุ่มนี้หายไปแล้ว");return end
  busy=true
  local switched=false
  local function work()
@@ -867,7 +856,7 @@ collectCycle=function(requestId,source)
   local ids={}
   for _,e in ipairs(Active:GetChildren()) do
    local n=eggName(e)
-   if EGGS[n] then
+   if eggAllowed(n) then
     ids[n]=ids[n] or {}
     table.insert(ids[n],e.Name)
    end
@@ -878,13 +867,14 @@ collectCycle=function(requestId,source)
   local count=0
   for _,card in ipairs(list) do
    if count>=MAX_COLLECT or not alive() then break end
+   if not eggAllowed(card.name) then continue end
    local available=ids[card.name] or {}
    if card.name==eggName(chosen) then
     table.sort(available,function(a,b) return a==requestId and b~=requestId end)
    end
    for _,id in ipairs(available) do
-    if not used[id] and Active:FindFirstChild(id) then
-     if press(card.button) then
+    if eggAllowed(card.name) and not used[id] and Active:FindFirstChild(id) then
+     if eggAllowed(card.name) and press(card.button) then
       used[id]=true;watching[id]=true;pending[id]=true;pendingSource[id]=source or "TELEGRAM"
       count=count+1
       send((source=="AUTO" and "🤖 ระบบ AUTO กำลังเริ่มเก็บ " or "🥚 ระบบ Telegram กำลังเริ่มเก็บ ")..card.name)
@@ -974,9 +964,12 @@ task.spawn(function()
   if env.EggMonitorEnabled then
    local phase,seconds=readTime()
    local present={}
+   for id,record in pairs(tracked) do
+    if not eggAllowed(record.name) then tracked[id]=nil;pending[id]=nil;pendingReset[id]=nil end
+   end
    for _,e in ipairs(Active:GetChildren()) do
     local name=eggName(e)
-    if EGGS[name] then
+    if eggAllowed(name) then
      local id=e.Name
      present[id]=true
      if not tracked[id] or tracked[id].state~="active" then
@@ -989,7 +982,7 @@ task.spawn(function()
    local sunrise=(lastPhase=="NIGHT" and phase=="DAY")
    detectTime()
    for id,record in pairs(tracked) do
-    if record.state=="active" and not present[id] then
+    if record.state=="active" and eggAllowed(record.name) and not present[id] then
      if sunrise and record.cycle<cycle and not pending[id] then
       record.state="reset"
       finalize(record,"⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว")
