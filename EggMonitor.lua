@@ -44,7 +44,7 @@ local ACCENT=Color3.fromRGB(250,91,68)
 local MUTED=Color3.fromRGB(145,161,181)
 local WHITE=Color3.fromRGB(235,242,250)
 local frame=Instance.new('Frame')
-frame.Name='MainPanel';frame.Size=UDim2.fromOffset(312,414)
+frame.Name='MainPanel';frame.Size=UDim2.fromOffset(312,280)
 frame.Position=UDim2.new(.5,-156,.5,-207)
 frame.BackgroundColor3=BG;frame.BorderSizePixel=0;frame.Active=true;frame.Draggable=true;frame.Parent=gui
 corner(frame,13);stroke(frame,Color3.fromRGB(65,78,95))
@@ -135,9 +135,9 @@ local function fitPanelToScreen()
  if not camera then return end
  local viewport=camera.ViewportSize
  if viewport.X<=0 or viewport.Y<=0 then return end
- local width=math.min(312,math.max(220,viewport.X-22))
- local height=math.min(414,math.max(165,viewport.Y-30))
- local scale=width/312
+ -- Chilli Hub-sized window; inner settings remain scrollable.
+ local scale=math.min(0.92,(viewport.X-24)/312,(viewport.Y-24)/280)
+ scale=math.max(0.45,scale)
  local uiScale=frame:FindFirstChild('CherubResponsiveScale')
  if not uiScale then
   uiScale=Instance.new('UIScale')
@@ -145,9 +145,8 @@ local function fitPanelToScreen()
   uiScale.Parent=frame
  end
  uiScale.Scale=scale
- local logicalHeight=math.min(414,math.max(165,(viewport.Y-30)/scale))
- frame.Size=UDim2.fromOffset(312,logicalHeight)
- frame.Position=UDim2.new(.5,-156*scale,.5,-logicalHeight*scale/2)
+ frame.Size=UDim2.fromOffset(312,280)
+ frame.Position=UDim2.new(.5,-156*scale,.5,-140*scale)
 end
 fitPanelToScreen()
 local viewportConnection=nil
