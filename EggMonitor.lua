@@ -67,6 +67,51 @@ task.spawn(function()
  end
 end)
 local function send(s) queueSend(s) end
+-- Position measured at Your Ranch in this session. Recheck if ranch moves.
+local RANCH_POSITION=Vector3.new(171.91,40333.41,1067.19)
+local RANCH_RADIUS=15
+local RANCH_STILL_SECONDS=5
+local RANCH_SPEED_LIMIT=2.5
+local RANCH_WAIT_WARNING=300
+local function ranchRoot()
+ local character=P.Character
+ return character and character:FindFirstChild("HumanoidRootPart")
+end
+local function ranchDistance()
+ local root=ranchRoot()
+ return root and (root.Position-RANCH_POSITION).Magnitude or math.huge
+end
+local function waitUntilRanchReturn()
+ -- Never treat the starting position at home as a completed return.
+ local hasLeft=ranchDistance()>RANCH_RADIUS
+ local stableFrom=nil
+ local started=os.clock()
+ local warned=false
+ while alive() do
+  local root=ranchRoot()
+  local dist=root and (root.Position-RANCH_POSITION).Magnitude or math.huge
+  if dist>RANCH_RADIUS then hasLeft=true;stableFrom=nil end
+  if hasLeft and root and dist<=RANCH_RADIUS then
+   local velocity=root.AssemblyLinearVelocity.Magnitude
+   if velocity<=RANCH_SPEED_LIMIT then
+    stableFrom=stableFrom or os.clock()
+    if os.clock()-stableFrom>=RANCH_STILL_SECONDS then
+     task.wait(REOPEN_DELAY)
+     -- Verify we stayed home throughout the reopen delay.
+     if alive() and ranchDistance()<=RANCH_RADIUS then return true end
+     stableFrom=nil
+    end
+   else stableFrom=nil end
+  end
+  if not warned and os.clock()-started>=RANCH_WAIT_WARNING then
+   warned=true
+   queueSend("⚠️ รอกลับถึง Your Ranch เกิน 5 นาที จึงยังไม่เปิด Event ทั้ง 5")
+  end
+  task.wait(.5)
+ end
+ return false
+end
+
 local function thumbnail(id)
  if not req then return nil end
  local ok,res=pcall(function() return req({Url="https://thumbnails.roblox.com/v1/assets?assetIds="..id.."&size=420x420&format=Png&isCircular=false",Method="GET"}) end)
@@ -434,7 +479,13 @@ local function collectCycle(requestId,source)
   for id in pairs(watching) do pending[id]=nil end
  end
  local ok,err=pcall(work)
- local restored=restore5(changed)
+ -- Keep the event switches untouched while Chilli is carrying an egg.
+ -- This waits for a real departure, return to Ranch, and a stable standstill.
+ local returned=true
+ if #changed>0 then
+  returned=waitUntilRanchReturn()
+ end
+ local restored=returned and restore5(changed) or 0
  if not ok then send("⚠️ เก็บไข่ไม่สำเร็จ: "..tostring(err)) end
  if #changed>0 and restored~=#changed then send("⚠️ เปิด Event กลับไม่ครบ โปรดตรวจสอบสวิตช์") end
  for id in pairs(pending) do pending[id]=nil;activeSource[id]=nil end
