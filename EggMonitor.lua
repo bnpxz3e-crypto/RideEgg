@@ -34,6 +34,7 @@ local CAMERA={
  [4]=CFrame.new(-485.576050,42435.886719,908.106445)*CFrame.fromOrientation(-0.29268137,0.73584962,0)
 }
 -- Chilli-inspired compact panel; all controls belong to our own GUI.
+-- Camera: one-time angle adjustment, no Scriptable lock.
 local gui=Instance.new('ScreenGui')
 gui.Name='CherubComboPanel';gui.ResetOnSpawn=false;gui.DisplayOrder=995;gui.Parent=pg
 local function corner(o,r) Instance.new('UICorner',o).CornerRadius=UDim.new(0,r or 3) end
@@ -158,35 +159,28 @@ end)
 local routeOn=false
 local speed=250
 local held=false
-local camConn=nil
-local cameraOldType=nil
 local monitorStarted=false
 local function releaseE()
  if held then pcall(function() VIM:SendKeyEvent(false,Enum.KeyCode.E,false,game) end);held=false end
 end
+-- Do not lock camera in Scriptable mode. Set the saved angle once and
+-- immediately leave Roblox's normal camera controller in charge.
 local function releaseCamera()
- if camConn then camConn:Disconnect();camConn=nil end
  local cam=workspace.CurrentCamera
- if cam and cameraOldType then cam.CameraType=cameraOldType end
- cameraOldType=nil
-end
--- Aim at the saved camera angle for just one second, then return control.
-local function aimCameraOneSecond(i)
- releaseCamera()
- local cam=workspace.CurrentCamera
- if not cam or not CAMERA[i] then return end
- cameraOldType=cam.CameraType
- cam.CameraType=Enum.CameraType.Scriptable
- cam.CFrame=CAMERA[i]
- camConn=RunService.RenderStepped:Connect(function()
-  if routeOn and alive() and workspace.CurrentCamera==cam then
-   cam.CFrame=CAMERA[i]
-  end
- end)
- local deadline=os.clock()+1
- while routeOn and alive() and os.clock()<deadline do
-  task.wait(.05)
+ if cam and cam.CameraType==Enum.CameraType.Scriptable then
+  cam.CameraType=Enum.CameraType.Custom
  end
+end
+local function aimCameraOneSecond(i)
+ local cam=workspace.CurrentCamera
+ local target=CAMERA[i]
+ if not cam or not target or not routeOn or not alive() then return end
+ releaseCamera()
+ cam.CameraType=Enum.CameraType.Custom
+ -- A single camera adjustment, not a continuous RenderStepped lock.
+ cam.CFrame=target
+ -- Briefly allow the game's camera and interaction prompts to update.
+ task.wait(.15)
  releaseCamera()
 end
 local function waitOn(seconds)
