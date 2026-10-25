@@ -460,6 +460,26 @@ task.spawn(function()
   if data then
    for _,u in ipairs(data.result or {}) do
     offset=math.max(offset,u.update_id+1)
+    -- Handle text commands separately from inline callback buttons.
+    local msg=u.message
+    if msg and msg.chat and tostring(msg.chat.id)==tostring(CHAT) then
+     local command=type(msg.text)=="string" and msg.text:lower():match("^%s*(.-)%s*$") or ""
+     if command=="auto" or command=="/auto" then
+      if autoEnabled then
+       task.spawn(send,"🟢 AUTO เปิดอยู่แล้ว (สำรองก่อนเช้า 1 นาที)")
+      else
+       autoEnabled=true
+       task.spawn(send,"🟢 เปิด AUTO สำรองแล้ว: รอแจ้งเตือน ☀️ อีก 1 นาทีจะเข้าสู่ตอนเช้า")
+      end
+     elseif command=="stop" or command=="/stop" then
+      if not autoEnabled then
+       task.spawn(send,"🔴 AUTO ปิดอยู่แล้ว")
+      else
+       autoEnabled=false
+       task.spawn(send,"🔴 ปิด AUTO สำรองแล้ว (ปุ่มเก็บไข่ Telegram ยังใช้ได้)")
+      end
+     end
+    end
     local cb=u.callback_query
     if cb and type(cb.data)=="string" and cb.data:sub(1,1)=="C" then
      local source=cb.message and cb.message.chat and tostring(cb.message.chat.id)
