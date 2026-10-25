@@ -30,20 +30,88 @@ local REOPEN_DELAY=10
 local DAY_ID="94969857695475"
 local NIGHT_ID="106891725078200"
 
+-- HTTP is serialized in a separate worker; scan loops never wait for Telegram.
+local httpJobs={}
+local lastHttp=0
 local function api(method,data)
  if not req or TOKEN=="PUT_NEW_BOT_TOKEN_HERE" then return nil end
- local ok,res=pcall(function()
-  return req({Url="https://api.telegram.org/bot"..TOKEN.."/"..method,Method="POST",Headers={["Content-Type"]="application/json"},Body=HS:JSONEncode(data)})
- end)
- if not ok or not res then return nil end
- local yes,obj=pcall(function() return HS:JSONDecode(res.Body or "{}") end)
- if yes and obj and obj.ok then return obj end
- if method=="editMessageCaption" or method=="editMessageText" then
-  warn("[EGG TIMER] Telegram edit failed: "..tostring(yes and obj and obj.description or res.Body))
- end
- return nil
+ local job={method=method,data=data,done=false,result=nil}
+ table.insert(httpJobs,job)
+ local untilAt=os.clock()+35
+ while alive() and not job.done and os.clock()<untilAt do task.wait(.1) end
+ return job.result
 end
-local function send(s) return api("sendMessage",{chat_id=CHAT,text=s}) end
+local function queueSend(text)
+ task.spawn(function() api("sendMessage",{chat_id=CHAT,text=text}) end)
+end
+task.spawn(function()
+ while alive() do
+  local job=table.remove(httpJobs,1)
+  if job then
+   local gap=2.2-(os.clock()-lastHttp)
+   if gap>0 then task.wait(gap) end
+   lastHttp=os.clock()
+   local ok,res=pcall(function()
+    return req({Url="https://api.telegram.org/bot"..TOKEN.."/"..job.method,Method="POST",Headers={["Content-Type"]="application/json"},Body=HS:JSONEncode(job.data),Timeout=12})
+   end)
+   if ok and res then
+    local yes,obj=pcall(function() return HS:JSONDecode(res.Body or "{}") end)
+    if yes and obj and obj.ok then job.result=obj end
+    if yes and obj and obj.error_code==429 then
+     local delay=math.clamp(tonumber(obj.parameters and obj.parameters.retry_after) or 5,2,45)
+     task.wait(delay)
+    end
+   end
+   job.done=true
+  else task.wait(.12) end
+ end
+end)
+local function send(s) queueSend(s) end
+-- Position measured at Your Ranch in this session. Recheck if ranch moves.
+local RANCH_POSITION=Vector3.new(171.91,40333.41,1067.19)
+local RANCH_RADIUS=15
+local RANCH_STILL_SECONDS=5
+local RANCH_SPEED_LIMIT=2.5
+local RANCH_WAIT_WARNING=300
+local function ranchRoot()
+ local character=P.Character
+ return character and character:FindFirstChild("HumanoidRootPart")
+end
+local function ranchDistance()
+ local root=ranchRoot()
+ return root and (root.Position-RANCH_POSITION).Magnitude or math.huge
+end
+local function waitUntilRanchReturn()
+ -- Never treat the starting position at home as a completed return.
+ local hasLeft=ranchDistance()>RANCH_RADIUS
+ local stableFrom=nil
+ local started=os.clock()
+ local warned=false
+ while alive() do
+  local root=ranchRoot()
+  local dist=root and (root.Position-RANCH_POSITION).Magnitude or math.huge
+  if dist>RANCH_RADIUS then hasLeft=true;stableFrom=nil end
+  if hasLeft and root and dist<=RANCH_RADIUS then
+   local velocity=root.AssemblyLinearVelocity.Magnitude
+   if velocity<=RANCH_SPEED_LIMIT then
+    stableFrom=stableFrom or os.clock()
+    if os.clock()-stableFrom>=RANCH_STILL_SECONDS then
+     task.wait(REOPEN_DELAY)
+     -- Verify we stayed home throughout the reopen delay.
+     if alive() and ranchDistance()<=RANCH_RADIUS then return true end
+     stableFrom=nil
+    end
+   else stableFrom=nil end
+  end
+  if not warned and os.clock()-started>=RANCH_WAIT_WARNING then
+   warned=true
+   queueSend("⚠️ รอกลับถึง Your Ranch เกิน 5 นาที จึงยังไม่เปิด Event ทั้ง 5")
+  end
+  task.wait(.5)
+ end
+ return false
+end
+
 local function thumbnail(id)
  if not req then return nil end
  local ok,res=pcall(function() return req({Url="https://thumbnails.roblox.com/v1/assets?assetIds="..id.."&size=420x420&format=Png&isCircular=false",Method="GET"}) end)
@@ -52,6 +120,7 @@ local function thumbnail(id)
  local item=yes and data.data and data.data[1]
  return item and item.state=="Completed" and item.imageUrl or nil
 end
+-- Use the exact Chilli Hub switch path and Activated handler from the user's original code.
 local function press(b)
  if not b or not b:IsA("GuiButton") or not getconnections then return false end
  local done=false
@@ -73,10 +142,18 @@ local function switchButton(name)
  end
 end
 local function toggle5()
- local n=0
+ local changed={}
  for _,name in ipairs(SWITCHES) do
   if not alive() then break end
-  if press(switchButton(name)) then n=n+1 end
+  if press(switchButton(name)) then table.insert(changed,name) end
+  task.wait(.3)
+ end
+ return #changed,changed
+end
+local function restore5(changed)
+ local n=0
+ for i=#changed,1,-1 do
+  if press(switchButton(changed[i])) then n=n+1 end
   task.wait(.3)
  end
  return n
@@ -104,23 +181,66 @@ local function cards()
  end
  return found
 end
+-- Read only the EggWeight inside the SAME Chilli Map Eggs card.
+-- Do not climb through unrelated parent containers: that mixed weights of other eggs.
 local function weightOf(name)
- for _,c in ipairs(cards()) do
-  if c.name==name then
-   local p=c.label.Parent
+ local matches={}
+ for _,card in ipairs(cards()) do
+  if card.name==name then
+   local p=card.label.Parent
    for _=1,4 do
     if not p then break end
     local w=p:FindFirstChild("EggWeight",true)
-    if w and w:IsA("TextLabel") and w.Text~="" then return w.Text end
-    for _,x in ipairs(p:GetDescendants()) do
-     if x:IsA("TextLabel") and x~=c.label and x.Text:lower():find("kg",1,true) then return x.Text end
+    if w and w:IsA("TextLabel") and w.Text~="" then
+     matches[w.Text]=true
+     break
     end
+    for _,x in ipairs(p:GetDescendants()) do
+     if x:IsA("TextLabel") and x~=card.label and x.Text:lower():find("kg",1,true) then
+      matches[x.Text]=true
+      break
+     end
+    end
+    if next(matches) then break end
     p=p.Parent
    end
   end
  end
- return "กำลังอัปเดต"
+ local value,count=nil,0
+ for w in pairs(matches) do value=w;count=count+1 end
+ if count==1 then return value end
+ if count>1 then return "รอตรวจสอบ (ไข่ชื่อซ้ำ)" end
+ return "รอตรวจสอบ (ยังไม่พบ EggWeight)"
 end
+-- Match the Map Eggs card by name. Only accept a unique card as evidence.
+local function basketEvidence(name)
+ local matches=0
+ local basket=false
+ for _,root in ipairs(roots) do
+  for _,v in ipairs(root:GetDescendants()) do
+   if v:IsA("TextLabel") and v.Text==name then
+    local parent=v.Parent
+    for depth=1,4 do
+     if not parent then break end
+     local textParts={}
+     for _,x in ipairs(parent:GetDescendants()) do
+      if x:IsA("TextLabel") then textParts[#textParts+1]=x.Text:lower() end
+     end
+     local text=table.concat(textParts," ")
+     if text:find("in basket",1,true) then
+      matches=matches+1;basket=true;break
+     end
+     if text:find("queued",1,true) or text:find("collect",1,true) then
+      matches=matches+1;break
+     end
+     parent=parent.Parent
+    end
+   end
+  end
+ end
+ return matches==1 and basket
+end
+
 local function readTime()
  local main=PG:FindFirstChild("Main")
  local dn=main and main:FindFirstChild("DayNightRotation")
@@ -187,26 +307,22 @@ end)
 env.RideEggTracked = env.RideEggTracked or {}
 local tracked=env.RideEggTracked
 local pending={}
+local autoEnabled=false
+local dawnNotified=false
+local collectClaims={}
+local pendingMissing={}
 local busy=false
+local activeSource={}
+local lastAutoAttempt={}
+local dawnCycle=0
+local dawnStarted=false
 local lastPhase,lastSeconds=nil,nil
 local cycle=0
 local warned={DAY=false,NIGHT=false}
 local pendingReset={}
-local function elapsedText(record)
- local elapsed=math.max(0,math.floor((DateTime.now().UnixTimestampMillis-(record.spawnedMs or ((record.spawnedAt or os.time())*1000)))/1000))
- local days=math.floor(elapsed/86400)
- local hours=math.floor(elapsed%86400/3600)
- local minutes=math.floor(elapsed%3600/60)
- if days>0 then
-  return string.format("⏱️ เกิดมาแล้ว: %d วัน %d ชั่วโมง %d นาที",days,hours,minutes)
- elseif hours>0 then
-  return string.format("⏱️ เกิดมาแล้ว: %d ชั่วโมง %d นาที",hours,minutes)
- end
- return string.format("⏱️ เกิดมาแล้ว: %d นาที",minutes)
-end
 local function captionFor(record,status)
  local item=EGGS[record.name]
- return item.icon.." พบ "..record.name.."\n⚖️ น้ำหนัก: "..(record.weight or "กำลังอัปเดต").."\n"..elapsedText(record).."\n"..(status or "🥚 กดปุ่มเพื่อเก็บไข่")
+ return item.icon.." พบ "..record.name.."\n⚖️ น้ำหนัก: "..(record.weight or "กำลังอัปเดต").."\n"..(status or "🥚 กดปุ่มเพื่อเก็บไข่")
 end
 local function editEggMessage(record,status)
  if not record.messageId then return false end
@@ -249,38 +365,33 @@ local function announce(e,record)
   if record.finalStatus then editEggMessage(record,record.finalStatus) end
  end
 end
-local function confirmCollected(record)
- if record.state~="active" then return end
- record.state="telegram"
- finalize(record,"✅ เก็บไข่สำเร็จ!")
+local function confirmCollected(record,source)
+ if record.state~="active" and record.state~="missing" then return end
+ if record.notifiedSuccess then return end
+ local prefix=source=="telegram" and "✅ กดเก็บ " or (source=="auto" and "✅ ระบบ AUTO เก็บ " or "✅ ระบบ Chilli เก็บ ")
+ record.notifiedSuccess=true
+ record.state="collected"
+ pendingMissing[record.id]=nil
  pending[record.id]=nil
- send("✅ เก็บไข่สำเร็จ!\n"..describe(record))
+ finalize(record,prefix..record.name.." สำเร็จ")
+ send(prefix..record.name.." สำเร็จ")
 end
 local function markMissing(record,phase,seconds)
  if record.state~="active" then return end
- if pending[record.id] then
-  confirmCollected(record)
-  return
- end
- -- If near the night->day transition, defer classification until the new day.
- if phase=="NIGHT" and seconds and seconds<=60 then
-  record.state="await-reset"
-  record.missingAt=os.clock()
-  pendingReset[record.id]=record
-  return
- end
- record.state="other"
- finalize(record,"🥚 ไข่ถูกเก็บแล้ว (ไม่ได้เก็บผ่าน Telegram)")
- send("🥚 ไข่ถูกเก็บแล้ว (ไม่ได้เก็บผ่าน Telegram)\n"..describe(record))
+ record.state="missing"
+ record.missingAt=os.clock()
+ record.missingPhase=phase
+ record.missingSeconds=seconds
+ pendingMissing[record.id]=record
 end
 local function settleReset()
- for id,record in pairs(pendingReset) do
-  if record.state=="await-reset" then
+ for id,record in pairs(pendingMissing) do
+  if record.state=="missing" then
    record.state="reset"
-   finalize(record,"⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว")
-   send("⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว\n"..describe(record))
+   finalize(record,"❌ ไข่ถูกรีเซ็ต ไม่มีระบบไหนเก็บไปได้")
+   send("❌ ไข่ถูกรีเซ็ต ไม่มีระบบไหนเก็บไปได้\n"..describe(record))
   end
-  pendingReset[id]=nil
+  pendingMissing[id]=nil
  end
 end
 local function detectTime()
@@ -289,16 +400,13 @@ local function detectTime()
  if lastPhase and phase~=lastPhase then
   if lastPhase=="NIGHT" and phase=="DAY" then
    cycle=cycle+1
-   -- At sunrise, eggs that were active in the preceding cycle may have reset.
-   for id,record in pairs(tracked) do
-    if record.state=="active" and record.cycle<cycle and not Active:FindFirstChild(id) then
-     record.state="reset"
-     send("⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว\n"..describe(record))
-    end
-   end
-   settleReset()
-  elseif lastPhase=="DAY" and phase=="NIGHT" then
-   -- A missing egg at dusk is not automatically considered a reset.
+   dawnCycle=dawnCycle+1
+   dawnStarted=false
+   dawnNotified=false
+   -- Allow final basket checks before declaring the reset.
+   task.delay(4,function()
+    if alive() then settleReset() end
+   end)
   end
   warned={DAY=false,NIGHT=false}
  elseif lastSeconds and seconds>lastSeconds+60 then
@@ -312,113 +420,124 @@ local function detectTime()
   end
   if hasEgg then
    warned[phase]=true
-   if phase=="DAY" then send("🌙 อีก 1 นาที จะเข้าสู่กลางคืน")
-   else send("☀️ อีก 1 นาที จะเข้าสู่ตอนเช้า") end
-  end
- end
- -- If the countdown wrapped while image remained unchanged, avoid indefinite pending.
- if phase=="NIGHT" and seconds>60 then
-  for id,record in pairs(pendingReset) do
-   if os.clock()-(record.missingAt or 0)>35 then
-    record.state="other";pendingReset[id]=nil
-    finalize(record,"🥚 ไข่ถูกเก็บแล้ว (ไม่ได้เก็บผ่าน Telegram)")
-    send("🥚 ไข่ถูกเก็บแล้ว (ไม่ได้เก็บผ่าน Telegram)\n"..describe(record))
+   if phase=="DAY" then
+    send("🌙 อีก 1 นาที จะเข้าสู่กลางคืน")
+   else
+    dawnNotified=true
+    send("☀️ อีก 1 นาที จะเข้าสู่ตอนเช้า")
    end
   end
  end
 end
 
-local function collectCycle(requestId)
- if busy then send("⏳ กำลังเก็บไข่รอบก่อนอยู่");return end
- if not env.EggMonitorEnabled then send("🔴 ระบบ Egg Monitor ปิดอยู่");return end
+local function collectCycle(requestId,source)
+ source=source or "telegram"
+ if busy or not env.EggMonitorEnabled then return end
  local chosen=Active:FindFirstChild(requestId)
- if not chosen or not EGGS[eggName(chosen)] then send("⚠️ ไข่จากปุ่มนี้หายไปแล้ว");return end
+ if not chosen or not EGGS[eggName(chosen)] then return end
  busy=true
- local switched=false
+ collectClaims[requestId]={source=source,at=os.clock()}
+ local changed={}
  local function work()
-  send("🥚 กำลังไปเก็บไข่\n"..eggName(chosen))
-  local off=toggle5();switched=true
-  send("⏸ สั่งปิด Halloween Event "..off.."/5")
-  if off~=5 then error("กดสวิตช์ Event ไม่ครบ 5/5; ตรวจสอบสถานะ Event ก่อนเปิดกลับ") end
-  task.wait(1)
-  local ids={}
-  for _,e in ipairs(Active:GetChildren()) do
-   local n=eggName(e)
-   if EGGS[n] then
-    ids[n]=ids[n] or {}
-    table.insert(ids[n],e.Name)
-   end
-  end
-  local list=cards()
-  table.sort(list,function(a,b) return a.name==eggName(chosen) and b.name~=eggName(chosen) end)
-  local watching,used={},{}
+  local n
+  n,changed=toggle5()
+  if n~=5 then error("ปิด Event ไม่ครบ 5/5 (กดได้ "..n..")") end
+  task.wait(.5)
   local count=0
-  for _,card in ipairs(list) do
-   if count>=MAX_COLLECT or not alive() then break end
-   local available=ids[card.name] or {}
-   if card.name==eggName(chosen) then
-    table.sort(available,function(a,b) return a==requestId and b~=requestId end)
-   end
-   for _,id in ipairs(available) do
-    if not used[id] and Active:FindFirstChild(id) then
-     if press(card.button) then
-      used[id]=true;watching[id]=true;pending[id]=true
-      count=count+1
-      send("🥚 สั่ง Collect "..count.."/"..MAX_COLLECT..": "..card.name)
-     end
-     break
+  local watching={}
+  for _,card in ipairs(cards()) do
+   if count>=MAX_COLLECT then break end
+   local selected=nil
+   for _,e in ipairs(Active:GetChildren()) do
+    if eggName(e)==card.name and not pending[e.Name] and (e.Name==requestId or source=="auto") then
+     selected=e.Name;break
     end
    end
-   task.wait(.3)
+   if selected and press(card.button) then
+    pending[selected]=true
+    activeSource[selected]=source
+    watching[selected]=true
+    count=count+1
+   end
   end
-  if count==0 then send("⚠️ ไม่พบปุ่ม Collect ที่กดได้") end
-  local start=os.clock()
-  while alive() and next(watching) and os.clock()-start<COLLECT_TIMEOUT do
+  local started=os.clock()
+  while alive() and next(watching) and os.clock()-started<math.min(COLLECT_TIMEOUT,55) do
    for id in pairs(watching) do
     if not Active:FindFirstChild(id) then
      watching[id]=nil
      local record=tracked[id]
-     if record then confirmCollected(record) end
-     pending[id]=nil
+     -- Wait for an actual basket state before reporting success.
+     if record and basketEvidence(record.name) then
+      confirmCollected(record,source)
+     elseif record and record.state=="active" then
+      markMissing(record,select(1,readTime()),select(2,readTime()))
+     end
     end
    end
-   if next(watching) then task.wait(1) end
+   task.wait(1)
   end
-  for id in pairs(watching) do
-   pending[id]=nil
-   send("⚠️ ยังไม่ยืนยันการเก็บไข่: "..id)
-  end
-  if count>0 and not next(watching) then task.wait(REOPEN_DELAY) end
-  local on=toggle5();switched=false
-  send("▶️ สั่งเปิด Halloween Event กลับ "..on.."/5")
+  for id in pairs(watching) do pending[id]=nil end
  end
  local ok,err=pcall(work)
- if not ok then
-  send("❌ เกิดข้อผิดพลาดขณะเก็บไข่: "..tostring(err))
-  -- Do not blindly toggle switches after a partial failure.
+ -- Keep the event switches untouched while Chilli is carrying an egg.
+ -- This waits for a real departure, return to Ranch, and a stable standstill.
+ local returned=true
+ if #changed>0 then
+  returned=waitUntilRanchReturn()
  end
- for id in pairs(pending) do pending[id]=nil end
+ local restored=returned and restore5(changed) or 0
+ if not ok then send("⚠️ เก็บไข่ไม่สำเร็จ: "..tostring(err)) end
+ if #changed>0 and restored~=#changed then send("⚠️ เปิด Event กลับไม่ครบ โปรดตรวจสอบสวิตช์") end
+ for id in pairs(pending) do pending[id]=nil;activeSource[id]=nil end
  busy=false
 end
-
 if not req or TOKEN=="PUT_NEW_BOT_TOKEN_HERE" then
  warn("Egg Monitor: fill in Telegram TOKEN and ensure executor supports HTTP")
 end
 
 task.spawn(function()
  local offset=0
- local init=api("getUpdates",{timeout=0,limit=100,allowed_updates={"callback_query"}})
+ local init=api("getUpdates",{timeout=0,limit=100,allowed_updates={"callback_query","message"}})
  if init then for _,u in ipairs(init.result or {}) do offset=math.max(offset,u.update_id+1) end end
  while alive() do
-  local data=api("getUpdates",{offset=offset,timeout=0,limit=50,allowed_updates={"callback_query"}})
+  local data=api("getUpdates",{offset=offset,timeout=0,limit=50,allowed_updates={"callback_query","message"}})
   if data then
    for _,u in ipairs(data.result or {}) do
     offset=math.max(offset,u.update_id+1)
+    local message=u.message
+    if message and message.chat and tostring(message.chat.id)==tostring(CHAT) then
+     local cmd=tostring(message.text or ""):lower():match("^%s*(.-)%s*$")
+     if cmd=="auto" then
+      autoEnabled=true
+      send("🤖 เปิด AUTO สำรองแล้ว จะเก็บไข่ที่เหลือหลังแจ้งเตือน 1 นาทีก่อนเช้า")
+     elseif cmd=="stop" then
+      autoEnabled=false
+      send("🛑 ปิด AUTO สำรองแล้ว ระบบตรวจไข่และปุ่ม Telegram ยังทำงาน")
+     end
+    end
     local cb=u.callback_query
     if cb and type(cb.data)=="string" and cb.data:sub(1,1)=="C" then
      local source=cb.message and cb.message.chat and tostring(cb.message.chat.id)
      api("answerCallbackQuery",{callback_query_id=cb.id,text="รับคำสั่งแล้ว"})
-     if source==CHAT then task.spawn(collectCycle,cb.data:sub(2)) end
+     if source==CHAT then task.spawn(collectCycle,cb.data:sub(2),"telegram") end
+    end
+   end
+  end
+  task.wait(7)
+ end
+end)
+
+task.spawn(function()
+ while alive() do
+  if autoEnabled and env.EggMonitorEnabled and not busy then
+   local phase,seconds=readTime()
+   if phase=="NIGHT" and seconds and seconds<=60 and dawnNotified then
+    for _,e in ipairs(Active:GetChildren()) do
+     if EGGS[eggName(e)] and not pending[e.Name] and not lastAutoAttempt[e.Name] then
+      lastAutoAttempt[e.Name]=true
+      task.spawn(collectCycle,e.Name,"auto")
+      break
+     end
     end
    end
   end
@@ -437,7 +556,7 @@ task.spawn(function()
     if EGGS[name] then
      local id=e.Name
      present[id]=true
-     if not tracked[id] or tracked[id].state~="active" then
+     if not tracked[id] then
       tracked[id]={id=id,name=name,state="active",cycle=cycle,spawnedAt=os.time(),spawnedMs=DateTime.now().UnixTimestampMillis,lastEditMinute=-1}
       task.spawn(announce,e,tracked[id])
      end
@@ -448,36 +567,20 @@ task.spawn(function()
    detectTime()
    for id,record in pairs(tracked) do
     if record.state=="active" and not present[id] then
-     if sunrise and record.cycle<cycle and not pending[id] then
-      record.state="reset"
-      finalize(record,"⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว")
-      send("⚠️ ไข่ไม่ถูกเก็บ โดนรีเซ็ตไปแล้ว\n"..describe(record))
-     else
-      markMissing(record,phase,seconds)
+     markMissing(record,phase,seconds)
+    end
+    if record.state=="missing" then
+     if basketEvidence(record.name) then
+      local claim=collectClaims[id]
+      local source=claim and claim.source or "chilli"
+      confirmCollected(record,source)
+     elseif sunrise then
+      -- Reset will be finalized after the sunrise grace period.
      end
     end
    end
   end
   task.wait(1)
- end
-end)
-
--- Keep counting even after collection, reset, or manual OFF.
--- Edit the original message only; no new Telegram message per minute.
-task.spawn(function()
- while alive() do
-  for _,record in pairs(tracked) do
-   if not alive() then break end
-   if record.messageId then
-    local minute=math.floor(math.max(0,(DateTime.now().UnixTimestampMillis-(record.spawnedMs or ((record.spawnedAt or os.time())*1000)))/60000))
-    if minute ~= record.lastEditMinute then
-     if editEggMessage(record) then
-      record.lastEditMinute=minute
-     end
-    end
-   end
-  end
-  task.wait(5)
  end
 end)
 
