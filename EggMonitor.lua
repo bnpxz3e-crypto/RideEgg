@@ -21,17 +21,17 @@ local old=pg:FindFirstChild('CherubComboPanel')
 if old then old:Destroy() end
 local DEST={
  {label='จุดเริ่มต้น',pos=Vector3.new(-484.85,42429.79,907.94)},
- {label='จุดที่ 1',pos=Vector3.new(-459.16,42430.86,879.43),hold=3,equip=true},
- {label='จุดที่ 2',pos=Vector3.new(-516.71,42431.29,927.74),hold=3,equip=true},
- {label='จุดที่ 3',pos=Vector3.new(-539.43,42432.33,848.25),hold=3,equip=true},
- {label='จุดที่ 4',pos=Vector3.new(-496.58,42430.93,893.82),hold=2},
+ {label='จุดที่ 1',pos=Vector3.new(-467.2011,42430.2383,890.9918),hold=3,equip=true},
+ {label='จุดที่ 2',pos=Vector3.new(-509.1570,42431.2734,924.4579),hold=3,equip=true},
+ {label='จุดที่ 3',pos=Vector3.new(-534.2612,42432.4805,851.7078),hold=3,equip=true},
+ {label='จุดที่ 4',pos=Vector3.new(-493.7951,42430.6328,899.0297),hold=2},
  {label='บ้าน',pos=Vector3.new(174.74,40316.42,1061.15)}
 }
 local CAMERA={
- [1]=CFrame.new(-471.368866,42436.234375,907.315430)*CFrame.fromOrientation(-0.16520408,-0.11923753,0),
- [2]=CFrame.new(-490.110229,42437.496094,922.611450)*CFrame.fromOrientation(-0.19392118,1.49393189,0),
- [3]=CFrame.new(-519.581116,42439.113281,866.312988)*CFrame.fromOrientation(-0.20994413,0.72658545,0),
- [4]=CFrame.new(-481.348175,42436.113281,918.115417)*CFrame.fromOrientation(-0.15176621,0.58706641,0)
+ [1]=CFrame.new(-466.487549,42437.886719,910.947327)*CFrame.fromOrientation(-0.29591522,0.03574060,0),
+ [2]=CFrame.new(-488.942108,42437.277344,926.766724)*CFrame.fromOrientation(-0.21493591,1.45707321,0),
+ [3]=CFrame.new(-520.750854,42439.371094,866.703735)*CFrame.fromOrientation(-0.25806719,0.73332822,0),
+ [4]=CFrame.new(-485.576050,42435.886719,908.106445)*CFrame.fromOrientation(-0.29268137,0.73584962,0)
 }
 -- Chilli-inspired compact panel; all controls belong to our own GUI.
 local gui=Instance.new('ScreenGui')
@@ -306,8 +306,18 @@ local function doDeposit(i)
   waitOn(.4)
   return true
  end
+ for n=5,1,-1 do
+  status.Text='⏳ '..point.label..' | รอก่อนกด E '..n..' วิ'
+  if not waitOn(1) then releaseCamera();return false,'หยุดแล้ว' end
+ end
+ -- Refresh the prompt after the wait; it may have disappeared.
+ local stillFound,freshPrompt=waitE(.6)
+ if not stillFound then
+  unequip();releaseCamera();status.Text='⏭ '..point.label..' | E หายไป ข้ามจุด'
+  return true
+ end
  status.Text='🖐 '..point.label..' | กด E เพื่อวาง'
- ok=pressE(point.hold,prompt)
+ ok=pressE(point.hold,freshPrompt)
  releaseCamera()
  if not ok then return false,'กด E ไม่สำเร็จ' end
  status.Text='✅ '..point.label..' | กด E แล้ว (ยังไม่ยืนยันการวาง)'
@@ -327,8 +337,17 @@ local function doPoint4()
   waitOn(.6)
   return true,'restart'
  end
+ for n=5,1,-1 do
+  status.Text='⏳ จุดที่ 4 | รอก่อนกด E รอบแรก '..n..' วิ'
+  if not waitOn(1) then releaseCamera();return false,'หยุดแล้ว' end
+ end
+ local stillFound,freshPrompt=waitE(.6)
+ if not stillFound then
+  releaseCamera();status.Text='⏭ จุดที่ 4 | E หายไป → เริ่มจุด 1 ใหม่'
+  return true,'restart'
+ end
  status.Text='🖐 จุดที่ 4 | กด E รอบแรก'
- ok=pressE(2,prompt)
+ ok=pressE(2,freshPrompt)
  -- Release camera immediately after the FIRST E, as requested.
  releaseCamera()
  if not ok then return false,'กด E รอบแรกไม่สำเร็จ' end
