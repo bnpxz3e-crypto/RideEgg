@@ -1,11 +1,12 @@
 -- Ride A Pet | Cherub Route + Egg Monitor (Delta)
 -- Set Telegram config before running, if needed:
--- getgenv().CherubTelegramToken = "YOUR_NEW_BOT_TOKEN"
--- getgenv().CherubTelegramChat = "YOUR_CHAT_ID"
+getgenv().CherubTelegramToken = "8455689997:AAHwzIdo53Eo4v1IdaONYYkUhR8yGylUaCI"
+getgenv().CherubTelegramChat = "1813392489"
 local Players = game:GetService('Players')
 local RunService = game:GetService('RunService')
 local VIM = game:GetService('VirtualInputManager')
 local UIS = game:GetService('UserInputService')
+local TweenService = game:GetService('TweenService')
 local player = Players.LocalPlayer
 local pg = player:WaitForChild('PlayerGui')
 local env = (getgenv and getgenv()) or _G
@@ -22,14 +23,14 @@ local DEST={
  {label='จุดเริ่มต้น',pos=Vector3.new(-484.85,42429.79,907.94)},
  {label='จุดที่ 1',pos=Vector3.new(-459.16,42430.86,879.43),hold=3,equip=true},
  {label='จุดที่ 2',pos=Vector3.new(-516.71,42431.29,927.74),hold=3,equip=true},
- {label='จุดที่ 3',pos=Vector3.new(-535.27, 42432.49, 851.91),hold=3,equip=true},
+ {label='จุดที่ 3',pos=Vector3.new(-539.43,42432.33,848.25),hold=3,equip=true},
  {label='จุดที่ 4',pos=Vector3.new(-496.58,42430.93,893.82),hold=2},
  {label='บ้าน',pos=Vector3.new(174.74,40316.42,1061.15)}
 }
 local CAMERA={
  [1]=CFrame.new(-471.368866,42436.234375,907.315430)*CFrame.fromOrientation(-0.16520408,-0.11923753,0),
  [2]=CFrame.new(-490.110229,42437.496094,922.611450)*CFrame.fromOrientation(-0.19392118,1.49393189,0),
- [3]=CFrame.new(-519.998230, 42443.585938, 870.434570)*CFrame.fromOrientation(-0.36286411,0.69170344,0),
+ [3]=CFrame.new(-519.581116,42439.113281,866.312988)*CFrame.fromOrientation(-0.20994413,0.72658545,0),
  [4]=CFrame.new(-481.348175,42436.113281,918.115417)*CFrame.fromOrientation(-0.15176621,0.58706641,0)
 }
 -- Chilli-inspired compact panel; all controls belong to our own GUI.
@@ -77,7 +78,40 @@ status.TextYAlignment=Enum.TextYAlignment.Center
 status.BackgroundTransparency=.3;status.BackgroundColor3=Color3.fromRGB(26,31,35)
 local routeHeading=label('⌄  Cherub Egg Route',139,28,19)
 routeHeading.TextColor3=Color3.fromRGB(184,217,250)
-local routeBtn=btn('Cherub Route    OFF',12,170,341,38,Color3.fromRGB(45,48,52))
+local routeBtn=btn('',12,170,341,38,Color3.fromRGB(22,24,27))
+local function makeSlideSwitch(row, caption)
+ row.Text=''
+ local name=Instance.new('TextLabel')
+ name.BackgroundTransparency=1;name.Position=UDim2.fromOffset(12,0)
+ name.Size=UDim2.new(1,-91,1,0);name.Text=caption
+ name.TextColor3=Color3.new(1,1,1);name.TextStrokeTransparency=.25
+ name.Font=Enum.Font.GothamBold;name.TextSize=16
+ name.TextXAlignment=Enum.TextXAlignment.Left;name.Parent=row
+ local track=Instance.new('Frame')
+ track.Name='SwitchTrack';track.Size=UDim2.fromOffset(62,27)
+ track.Position=UDim2.new(1,-68,.5,-13)
+ track.BackgroundColor3=Color3.fromRGB(28,29,29)
+ track.BorderSizePixel=0;track.Parent=row
+ local outline=Instance.new('UIStroke',track)
+ outline.Color=Color3.fromRGB(0,0,0);outline.Thickness=2
+ local knob=Instance.new('Frame')
+ knob.Name='Knob';knob.Size=UDim2.fromOffset(22,21)
+ knob.Position=UDim2.fromOffset(3,3)
+ knob.BackgroundColor3=Color3.fromRGB(245,245,245)
+ knob.BorderSizePixel=0;knob.Parent=track
+ local edge=Instance.new('UIStroke',knob)
+ edge.Color=Color3.fromRGB(8,8,8);edge.Thickness=1.5
+ local function update(on)
+  TweenService:Create(track,TweenInfo.new(.18,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{
+   BackgroundColor3=on and Color3.fromRGB(16,182,39) or Color3.fromRGB(28,29,29)
+  }):Play()
+  TweenService:Create(knob,TweenInfo.new(.18,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{
+   Position=on and UDim2.fromOffset(37,3) or UDim2.fromOffset(3,3)
+  }):Play()
+ end
+ return update
+end
+local updateRouteSwitch=makeSlideSwitch(routeBtn,'Cherub Egg Route')
 local speedLabel=label('ความเร็วบิน (studs/s)',214,26,14)
 local speedBox=Instance.new('TextBox')
 speedBox.Size=UDim2.fromOffset(100,30);speedBox.Position=UDim2.fromOffset(250,212)
@@ -87,7 +121,8 @@ speedBox.Parent=frame
 local speedStroke=Instance.new('UIStroke',speedBox);speedStroke.Color=Color3.fromRGB(100,110,120)
 local monitorHeading=label('⌄  Egg Notifications',250,27,19)
 monitorHeading.TextColor3=Color3.fromRGB(184,217,250)
-local monitorBtn=btn('Egg Monitor    OFF',12,279,341,38,Color3.fromRGB(45,48,52))
+local monitorBtn=btn('',12,279,341,38,Color3.fromRGB(22,24,27))
+local updateMonitorSwitch=makeSlideSwitch(monitorBtn,'Egg Monitor')
 local hint=label('Route วนลูป • กลับบ้านรอ 5 วิ • E จุด 4 ไม่ขึ้น = เริ่มใหม่',322,24,11)
 hint.TextColor3=Color3.fromRGB(165,174,188)
 -- Independent launcher remains visible when the large panel is hidden.
@@ -311,10 +346,8 @@ local function doPoint4()
  return true,'home'
 end
 local function render()
- routeBtn.Text=routeOn and 'Cherub Route                       ON  ■' or 'Cherub Route                       OFF  □'
- routeBtn.BackgroundColor3=routeOn and Color3.fromRGB(33,100,58) or Color3.fromRGB(45,48,52)
- monitorBtn.Text=env.EggMonitorEnabled and 'Egg Monitor                        ON  ■' or 'Egg Monitor                        OFF  □'
- monitorBtn.BackgroundColor3=env.EggMonitorEnabled and Color3.fromRGB(33,100,58) or Color3.fromRGB(45,48,52)
+ updateRouteSwitch(routeOn)
+ updateMonitorSwitch(env.EggMonitorEnabled)
  speedLabel.Text='ความเร็วบิน: '..tostring(speed)..' studs/s'
 end
 speedBox.FocusLost:Connect(function()
