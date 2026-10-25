@@ -1,6 +1,6 @@
 -- Ride A Pet | Egg monitor + Telegram + Day/Night
 -- Fill in a NEW Telegram bot token. Do not share it publicly.
-local TOKEN = "8455689997:AAHwzIdo53Eo4v1IdaONYYkUhR8yGylUaCI"
+local TOKEN = "8828641953:AAHP58nmC9bklzUxhRmHiU0hEslHvPp2cRk"
 local CHAT = "1813392489"
 
 local Players=game:GetService("Players")
