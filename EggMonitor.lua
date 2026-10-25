@@ -346,15 +346,42 @@ local function detectTime()
     if autoEnabled and autoTriggeredCycle~=cycle then
      autoTriggeredCycle=cycle
      task.spawn(function()
-      task.wait(3)
-      if not alive() or not autoEnabled or not env.EggMonitorEnabled or busy then return end
-      if chilliWorking() or chilliAutoOn() then return end
-      for _,e in ipairs(Active:GetChildren()) do
-       if not alive() or not autoEnabled or busy or chilliWorking() or chilliAutoOn() then return end
-       if EGGS[eggName(e)] then
-        collectCycle(e.Name,"AUTO")
+      -- Keep checking during the remaining minute; don't silently give up
+      -- after one busy/Chilli state check.
+      local lastReason=nil
+      local function report(reason)
+       if reason~=lastReason then
+        lastReason=reason
+        task.spawn(send,"🤖 AUTO สำรอง: "..reason)
+       end
+      end
+      report("เริ่มตรวจไข่ที่เหลือก่อนเช้า")
+      while alive() and autoEnabled and env.EggMonitorEnabled do
+       local currentPhase,left=readTime()
+       if currentPhase~="NIGHT" or not left or left>60 or left<=0 then
+        report("สิ้นสุดช่วงก่อนเช้า ยังไม่มีการสั่งเก็บจาก AUTO")
         return
        end
+       if busy then
+        report("รอรอบเก็บไข่เดิมจบ")
+       elseif chilliWorking() then
+        report("Chilli กำลังขน/จองไข่ จึงไม่สั่งซ้ำ")
+       elseif chilliAutoOn() then
+        report("Chilli เปิด Auto Collect Eggs อยู่ จึงไม่สั่งชน")
+       else
+        local target=nil
+        for _,e in ipairs(Active:GetChildren()) do
+         if EGGS[eggName(e)] then target=e;break end
+        end
+        if not target then
+         report("ไม่มีไข่เป้าหมายเหลือให้เก็บ")
+         return
+        end
+        report("พบ "..eggName(target).." กำลังสั่งเก็บสำรอง")
+        collectCycle(target.Name,"AUTO")
+        return
+       end
+       task.wait(5)
       end
      end)
     end
